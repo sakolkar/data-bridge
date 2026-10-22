@@ -19,13 +19,17 @@ Tasks are ordered by prerequisite. Complete all **Required** tasks through Phase
 ### Task 0.2 - Establish configuration and application lifecycle (Required)
 
 **Description**
-- Define how the service receives its data/storage paths and runtime settings, with sensible local defaults.
+- Read the required `DATABRIDGE_SECRET_KEY` and `DATABRIDGE_SQLITE_PATH` environment variables at application startup, without defaults.
+- Validate a Fernet-compatible key and an absolute SQLite file path, and prepare missing database parent directories without opening SQLite.
 - Keep configuration separate from route and connector implementation.
 
 **Acceptance criteria**
-- The service starts using documented defaults without requiring secrets.
-- Storage and file-root paths can be configured without changing code.
-- Invalid required configuration produces a clear startup error.
+- The service starts with documented environment configuration and exposes immutable settings through application lifespan state.
+- Missing/blank values, invalid keys, relative database paths, directory targets, and storage preparation failures produce clear startup errors without revealing the key.
+- The database location is configurable without changing code and is not restricted to a base directory.
+- Startup creates missing parent directories but does not create/open the database or alter an existing database file.
+- Importing the application does not require configuration or perform filesystem writes.
+- Encryption, database persistence, and connector file-root configuration remain separate tasks.
 
 ### Task 0.3 - Add a basic health endpoint (Required)
 

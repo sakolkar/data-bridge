@@ -10,7 +10,13 @@ services:
   databridge:
     build: ./data-bridge
     image: data-bridge:local
+    environment:
+      DATABRIDGE_SECRET_KEY: ${DATABRIDGE_SECRET_KEY:?Set DATABRIDGE_SECRET_KEY to a Fernet key}
+      DATABRIDGE_SQLITE_PATH: /var/lib/databridge/db.sqlite
+    volumes:
+      - databridge-data:/var/lib/databridge
     ports:
       - 8000:8000
 volumes:
   sftp-data:
+  databridge-data:
