@@ -1,0 +1,16 @@
+services:
+  sftp:
+    image: atmoz/sftp:alpine-3.7
+    ports:
+      - "2222:22"
+    command: testuser:testpass:1001
+    volumes:
+      - sftp-data:/home/testuser/data
+    restart: unless-stopped
+  databridge:
+    build: ./data-bridge
+    image: data-bridge:local
+    ports:
+      - 8000:8000
+volumes:
+  sftp-data:
