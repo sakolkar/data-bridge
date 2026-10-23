@@ -5,6 +5,7 @@ import pytest
 
 from connector.local import LocalConnector
 from exceptions import (
+    ConnectorFileExistsError,
     ConnectorFileNotFoundError,
     ConnectorOperationError,
     InvalidConnectorArgumentError,
@@ -68,8 +69,31 @@ def test_read_write_and_replace(tmp_path: Path) -> None:
     connector = LocalConnector(tmp_path)
     connector.write("nested/file.bin", b"\x00\xff\n")
     assert connector.read("nested/file.bin") == b"\x00\xff\n"
-    connector.write("nested/file.bin", b"replacement")
+    connector.write("nested/file.bin", b"replacement", mode="replace")
     assert (tmp_path / "nested" / "file.bin").read_bytes() == b"replacement"
+
+
+def test_create_never_overwrites_existing_entries(tmp_path: Path) -> None:
+    connector = LocalConnector(tmp_path)
+    connector.write("file", b"original")
+    (tmp_path / "link").symlink_to("missing")
+    for path in ("file", "link"):
+        with pytest.raises(ConnectorFileExistsError):
+            connector.write(path, b"replacement")
+    assert connector.read("file") == b"original"
+    assert not (tmp_path / "missing").exists()
+
+
+def test_replace_requires_existing_file_and_truncates(tmp_path: Path) -> None:
+    connector = LocalConnector(tmp_path)
+    with pytest.raises(ConnectorFileNotFoundError):
+        connector.write("missing", b"data", mode="replace")
+    assert not (tmp_path / "missing").exists()
+    connector.write("file", b"long contents")
+    connector.write("file", b"short", mode="replace")
+    assert connector.read("file") == b"short"
+    connector.write("file", b"", mode="replace")
+    assert connector.read("file") == b""
 
 
 @pytest.mark.parametrize(

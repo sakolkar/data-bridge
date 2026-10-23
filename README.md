@@ -67,13 +67,13 @@ abstract class:
 | --- | --- |
 | `list(recursive=False)` | Return objects with relative `path`, byte `size`, and `type` (`directory`, `file`, or `symlink`); recursive listings omit directory entries. |
 | `read(path)` | Return the complete file as bytes. |
-| `write(path, data)` | Create or replace a file with bytes. |
+| `write(path, data, mode="create")` | Create a file exclusively, or use `mode="replace"` to replace an existing file. |
 | `head(path, lines=10, max_bytes=65536)` | Return a bounded prefix, limited by LF-delimited lines and bytes. |
 
 Paths are logical names relative to a connector, not host-specific absolute
 paths. Both head limits must be positive; the byte limit may truncate a line.
 Implementations must read only a bounded prefix for head, not the entire file.
-Connector errors distinguish missing files, invalid arguments, and operational
+Connector errors distinguish missing files, existing-file conflicts, invalid arguments, and operational
 failures without depending on HTTP.
 All application-defined exceptions live in `data-bridge/src/exceptions.py` and
 derive from `DatabridgeException`.
@@ -88,16 +88,17 @@ Reads, writes, and head operations reject absolute paths,
 parent traversal, and symbolic links that resolve outside the home. Writes
 create or replace files; parent directories must already exist.
 
-SFTP connectors, file-operation routes, connector resolution, transfers, and
-schema inference are not implemented yet.
+SFTP connectors, transfers, and schema inference are not implemented yet.
 
 ## Connection configuration API
 
 Connection routes are defined in `data-bridge/src/routes/connection.py`.
 
 Run `bash ./curl-suite.sh` from the repository root for a basic menu of curl
-requests to `http://localhost:8000`. Choose an operation and enter the name
-and JSON body when prompted; choose `0` to quit.
+requests to `http://localhost:8000` (override with `DATABRIDGE_URL`). It covers
+connection CRUD and file list/read/head/create/replace; enter values when
+prompted, and choose `0` to quit. File writes upload a local source file as raw
+bytes; reads can print to the terminal or save to a local file.
 
 Use the singular `/connection` endpoint. POST requires `name` in the JSON body;
 GET, PUT, and DELETE use query parameters, never URL path segments.
@@ -165,9 +166,46 @@ SQLite conflict handling. The model uses `EncryptedString` from `src/db/fields.p
 to transparently encrypt and decrypt settings as strings. New values are stored
 as text Fernet tokens; older binary tokens need conversion to text before they
 can be read by this field.
-The API does not execute file operations or verify connectivity. Authentication
-and authorization are not implemented; do not expose this service to untrusted
-clients.
+Saving connection configuration does not verify connectivity. Authentication and
+authorization are not implemented; do not expose this service to untrusted clients.
+
+## File I/O API
+
+`/connection/file` resolves a saved connection using the required `name` query
+parameter. The required `action` selects the operation:
+
+| Request | Result |
+| --- | --- |
+| `GET /connection/file?name=...&action=list` | JSON array of entry objects; `recursive=false` by default. |
+| `GET /connection/file?name=...&action=read&path=...` | Complete file as raw bytes. |
+| `GET /connection/file?name=...&action=head&path=...` | Raw prefix; defaults to `lines=10` and `max_bytes=65536`, both positive. |
+| `POST /connection/file?name=...&action=write&path=...` | Create a file; returns 201 with no body, or 409 if the entry exists. |
+| `PUT /connection/file?name=...&action=write&path=...` | Replace an existing file; returns 204, or 404 if it is missing. |
+
+File paths are relative to the connection home and must be URL-encoded exactly
+once. Listing starts at the home directory and does not accept `path`.
+Read and head responses use `application/octet-stream`. POST and PUT write the
+raw request body as-is, regardless of Content-Type; JSON, text, and binary data
+are not parsed or transformed. Empty bodies create or truncate to an empty file.
+Parent directories must already exist. Reads and writes currently buffer
+contents in memory rather than streaming.
+
+Missing connections or files return 404; invalid actions, paths, and limits
+return 422. Operational failures return a generic 500 and are logged without
+file contents or configuration values.
+
+```bash
+curl --get 'http://localhost:8000/connection/file' \
+  --data-urlencode 'name=local-files' --data-urlencode 'action=list' \
+  --data-urlencode 'recursive=true'
+
+curl -X POST 'http://localhost:8000/connection/file?name=local-files&action=write&path=example.bin' \
+  -H 'Content-Type: application/octet-stream' --data-binary @example.bin
+
+curl --get 'http://localhost:8000/connection/file' \
+  --data-urlencode 'name=local-files' --data-urlencode 'action=read' \
+  --data-urlencode 'path=example.bin' --output downloaded.bin
+```
 
 ## Run with Docker Compose
 

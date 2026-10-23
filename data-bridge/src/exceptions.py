@@ -40,6 +40,12 @@ class ConnectorFileNotFoundError(ConnectorError):
     """
 
 
+class ConnectorFileExistsError(ConnectorError):
+    """
+    Creating a file would overwrite an existing entry.
+    """
+
+
 class InvalidConnectorArgumentError(ConnectorError):
     """
     A logical path or operation argument is invalid.

@@ -1,6 +1,8 @@
 from abc import ABC, abstractmethod
 from typing import Literal, TypedDict
 
+WriteMode = Literal["create", "replace"]
+
 
 class FileEntry(TypedDict):
     path: str
@@ -34,9 +36,12 @@ class Connector(ABC):
         """
 
     @abstractmethod
-    def write(self, path: str, data: bytes) -> None:
+    def write(self, path: str, data: bytes, *, mode: WriteMode = "create") -> None:
         """
-        Create or replace a file with the supplied bytes.
+        Create a file, or replace an existing file in replace mode.
+
+        Create mode raises ConnectorFileExistsError if the entry exists.
+        Replace mode raises ConnectorFileNotFoundError if the file is missing.
         """
 
     @abstractmethod

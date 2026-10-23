@@ -4,8 +4,9 @@ from pathlib import Path
 from stat import S_ISDIR, S_ISLNK, S_ISREG
 from typing import Literal
 
-from connector import Connector, FileEntry
+from connector import Connector, FileEntry, WriteMode
 from exceptions import (
+    ConnectorFileExistsError,
     ConnectorFileNotFoundError,
     ConnectorOperationError,
     InvalidConnectorArgumentError,
@@ -13,11 +14,13 @@ from exceptions import (
 
 
 @contextmanager
-def _filesystem_errors():
+def _filesystem_errors() -> Iterator[None]:
     try:
         yield
     except FileNotFoundError:
         raise ConnectorFileNotFoundError("File not found.") from None
+    except FileExistsError:
+        raise ConnectorFileExistsError("File already exists.") from None
     except OSError:
         raise ConnectorOperationError("Local file operation failed.") from None
 
@@ -43,12 +46,13 @@ class LocalConnector(Connector):
             raise InvalidConnectorArgumentError(
                 "Path must stay within the home directory."
             )
-        resolved = (self.path / relative).resolve()
+        candidate = self.path / relative
+        resolved = candidate.resolve()
         if not resolved.is_relative_to(self.path):
             raise InvalidConnectorArgumentError(
                 "Path must stay within the home directory."
             )
-        return resolved
+        return candidate
 
     def list(self, recursive: bool = False) -> list[FileEntry]:
         # TODO: pagination/limits to avoid loading too many entries into memory at once
@@ -87,13 +91,20 @@ class LocalConnector(Connector):
         with _filesystem_errors():
             return self._resolve(path).read_bytes()
 
-    def write(self, path: str, data: bytes) -> None:
+    def write(self, path: str, data: bytes, *, mode: WriteMode = "create") -> None:
         # TODO: add streamed writing from Transfer-Encoding: chunked
 
         if not isinstance(data, bytes):
             raise InvalidConnectorArgumentError("File data must be bytes.")
+        if mode not in ("create", "replace"):
+            raise InvalidConnectorArgumentError("Invalid file write mode.")
         with _filesystem_errors():
-            self._resolve(path).write_bytes(data)
+            with self._resolve(path).open(
+                "xb" if mode == "create" else "r+b"
+            ) as stream:
+                stream.write(data)
+                if mode == "replace":
+                    stream.truncate()
 
     def head(self, path: str, lines: int = 10, max_bytes: int = 65536) -> bytes:
         # TODO: determine file type and pass along to appropriate implementation of file handler

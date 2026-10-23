@@ -13,9 +13,14 @@ from db.db import Database
 from exceptions import (
     ConnectionNotFoundError,
     ConnectionStoreError,
+    ConnectorError,
+    ConnectorFileExistsError,
+    ConnectorFileNotFoundError,
     DuplicateConnectionError,
+    InvalidConnectorArgumentError,
 )
 from routes.connection import router as connection_router
+from routes.file import router as file_router
 
 logger = logging.getLogger(__name__)
 
@@ -44,6 +49,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
 
 app = FastAPI(title="DataBridge", lifespan=lifespan)
 app.include_router(connection_router)
+app.include_router(file_router)
 
 
 @app.exception_handler(RequestValidationError)
@@ -71,3 +77,17 @@ async def connection_error_handler(
     return JSONResponse(
         status_code=500, content={"detail": "Connection storage is unavailable."}
     )
+
+
+@app.exception_handler(ConnectorError)
+async def connector_error_handler(
+    request: Request, error: ConnectorError
+) -> JSONResponse:
+    if isinstance(error, ConnectorFileNotFoundError):
+        return JSONResponse(status_code=404, content={"detail": str(error)})
+    if isinstance(error, ConnectorFileExistsError):
+        return JSONResponse(status_code=409, content={"detail": str(error)})
+    if isinstance(error, InvalidConnectorArgumentError):
+        return JSONResponse(status_code=422, content={"detail": str(error)})
+    logger.error("Connector operation failed.")
+    return JSONResponse(status_code=500, content={"detail": "File operation failed."})
