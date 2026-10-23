@@ -6,7 +6,7 @@ from fastapi.exceptions import RequestValidationError
 from pydantic import ValidationError
 
 from connection_store import ConnectionStore
-from connector.local import LocalConnectionConfiguration
+from connector.registry import validate_configuration
 from db.models import ConnectionName, ConnectionRecord
 
 router = APIRouter(prefix="/connection")
@@ -22,12 +22,13 @@ Name = Annotated[ConnectionName, Query()]
 
 def get_create_record(body: dict[str, object]) -> ConnectionRecord:
     try:
-        configuration = LocalConnectionConfiguration.model_validate(body)
+        configuration = validate_configuration(body)
+        fields = configuration.model_dump()
         return ConnectionRecord.model_validate(
             {
-                "name": configuration.name,
-                "type": configuration.type,
-                "settings": json.dumps({"path": configuration.path}),
+                "name": fields.pop("name"),
+                "type": fields.pop("type"),
+                "settings": json.dumps(fields),
             }
         )
     except ValidationError as error:

@@ -115,11 +115,10 @@ for example, `demo + data` becomes `demo%20%2B%20data`.
 
 Names are nonblank, case-sensitive, and at most 128 characters. Spaces and
 Unicode are preserved; control characters are rejected. POST/PUT accept only
-implemented connector types; currently, only `type: "local"` is supported.
-Supply a string `path` instead of `settings`. It must be nonblank and contain no
-null characters;
-the home directory is not accessed or checked when saving configuration.
-Generic and unimplemented types return 422. Extra body fields are rejected.
+implemented connector types: `local` and `sftp`. Local connections require a
+nonblank `path` with no null characters; the home directory is not accessed or
+checked when saving configuration. SFTP connections require `host`, `port`
+(1-65535), `username`, and `password`. Extra body fields are rejected.
 PUT cannot rename a connection and rejects `name` in the body.
 
 Settings are encrypted in SQLite and returned decrypted in the connection list.
@@ -127,7 +126,8 @@ Each list entry contains `name`, `type`, and `settings` as a JSON object;
 single-connection detail and create/replace responses contain only `name` and
 `type`. To replace settings, supply the complete new object; no merge endpoint
 is provided. Local paths are serialized as `{"path":"..."}` in encrypted
-settings. Validation responses do not echo submitted values.
+settings. SFTP credentials are encrypted at rest. Validation responses do not
+echo submitted values.
 
 Duplicate names return 409; absent connections return 404; invalid input returns
 422. Storage failures return a generic 500 and are logged without credentials.
@@ -148,10 +148,20 @@ curl -X PUT 'http://localhost:8000/connection?name=local-files' \
   -d '{"type":"local","path":"/replacement"}'
 
 curl -X DELETE 'http://localhost:8000/connection?name=local-files'
+
+# Configure an SFTP connector. Its host key must already be trusted in the
+# service user's SSH known_hosts file.
+curl -X POST 'http://localhost:8000/connection' \
+  -H 'Content-Type: application/json' \
+  -d '{"name":"sftp-files","type":"sftp","host":"localhost","port":8822,"username":"testuser","password":"<password>"}'
+
+curl --get 'http://localhost:8000/connection/file' \
+  --data-urlencode 'name=sftp-files' --data-urlencode 'action=list'
 ```
 
-Local configuration is validated by `LocalConnectionConfiguration` in
-`src/routes/connection.py`; no generic configuration fallback is accepted.
+Connector configuration and construction are registered in
+`src/connector/registry.py`; each connector type provides its own validated
+settings model and factory.
 `ConnectionRecord` in `src/db/models.py` is the SQLModel model used for database
 storage and internal decrypted configurations. POST validates the body directly;
 PUT combines the query name with the body before validating the record.

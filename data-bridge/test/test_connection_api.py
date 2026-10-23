@@ -171,7 +171,6 @@ def test_create_requires_name_in_body(client: TestClient) -> None:
     [
         {"type": "generic", "settings": "private-value"},
         {"type": "custom", "settings": "private-value"},
-        {"type": "sftp", "path": "/data"},
         {"type": "LOCAL", "path": "/data"},
     ],
 )
@@ -271,6 +270,61 @@ def test_local_configuration_persists_encrypted(
         assert json.loads(app.state.connection_store.get("local-files").settings) == {
             "path": home
         }
+
+
+def test_sftp_configuration_is_encrypted_and_listed(
+    client: TestClient, sqlite_path: Path
+) -> None:
+    password = "manual-test-password"
+    response = client.post(
+        "/connection",
+        json={
+            "name": "sftp-files",
+            "type": "sftp",
+            "host": "localhost",
+            "port": 8822,
+            "username": "testuser",
+            "password": password,
+        },
+    )
+    assert response.status_code == 201
+    assert response.json() == {"name": "sftp-files", "type": "sftp"}
+    assert password.encode() not in sqlite_path.read_bytes()
+    assert client.get("/connection").json() == [
+        {
+            "name": "sftp-files",
+            "type": "sftp",
+            "settings": {
+                "host": "localhost",
+                "port": 8822,
+                "username": "testuser",
+                "password": password,
+            },
+        }
+    ]
+    assert client.get("/connection", params={"name": "sftp-files"}).json() == {
+        "name": "sftp-files",
+        "type": "sftp",
+    }
+
+
+@pytest.mark.parametrize(
+    "fields",
+    [
+        {"host": "", "port": 8822, "username": "testuser", "password": "private"},
+        {"host": "localhost", "port": 0, "username": "testuser", "password": "private"},
+        {"host": "localhost", "port": 8822, "username": "", "password": "private"},
+        {"host": "localhost", "port": 8822, "username": "testuser", "password": ""},
+    ],
+)
+def test_invalid_sftp_configuration_does_not_echo_password(
+    client: TestClient, fields: dict[str, object]
+) -> None:
+    response = client.post(
+        "/connection", json={"name": "sftp-files", "type": "sftp", **fields}
+    )
+    assert response.status_code == 422
+    assert "private" not in response.text
 
 
 def test_store_errors_are_logged_without_secrets(

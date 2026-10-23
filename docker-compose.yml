@@ -2,10 +2,10 @@ services:
   sftp:
     image: atmoz/sftp:alpine-3.7
     ports:
-      - "2222:22"
+      - "8822:22"
     command: testuser:testpass:1001
     volumes:
-      - sftp-data:/home/testuser/data
+      - ./.databridge/sftp:/home/testuser/data
     restart: unless-stopped
   databridge:
     build: ./data-bridge
@@ -14,9 +14,6 @@ services:
       DATABRIDGE_SECRET_KEY: ${DATABRIDGE_SECRET_KEY:-LGV0e84Z6Dyv1zXPyrjUnW75clrMQQ8LINNNaLtvTKQ=}
       DATABRIDGE_SQLITE_PATH: /var/lib/databridge/db.sqlite
     volumes:
-      - databridge-data:/var/lib/databridge
+      - ./.databridge/local:/var/lib/databridge
     ports:
       - 8000:8000
-volumes:
-  sftp-data:
-  databridge-data:

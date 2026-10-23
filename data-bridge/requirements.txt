@@ -1,3 +1,4 @@
 fastapi[standard]==0.115.12
 cryptography==50.0.2
 sqlmodel==0.0.48
+paramiko==5.1.0

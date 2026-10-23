@@ -1,0 +1,195 @@
+import errno
+from collections.abc import Iterator
+from contextlib import contextmanager
+from pathlib import PurePosixPath
+from stat import S_ISDIR, S_ISLNK, S_ISREG
+from typing import Annotated, Literal
+
+import paramiko
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+from connector import Connector, FileEntry, WriteMode
+from exceptions import (
+    ConnectorFileExistsError,
+    ConnectorFileNotFoundError,
+    ConnectorOperationError,
+    InvalidConnectorArgumentError,
+)
+
+
+class SFTPConnectionSettings(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    host: str
+    port: Annotated[int, Field(ge=1, le=65535)]
+    username: str
+    password: str = Field(repr=False)
+
+    @field_validator("host", "username")
+    @classmethod
+    def validate_nonblank(cls, value: str) -> str:
+        if not value.strip() or "\x00" in value:
+            raise ValueError("Value must be nonblank and contain no null characters.")
+        return value
+
+    @field_validator("password")
+    @classmethod
+    def validate_password(cls, value: str) -> str:
+        if not value:
+            raise ValueError("Password must be nonblank.")
+        return value
+
+
+class SFTPConnectionConfiguration(SFTPConnectionSettings):
+    name: Annotated[str, Field(min_length=1, max_length=128)]
+    type: Literal["sftp"]
+
+
+@contextmanager
+def _sftp_errors() -> Iterator[None]:
+    try:
+        yield
+    except OSError as error:
+        if error.errno == errno.ENOENT:
+            raise ConnectorFileNotFoundError("File not found.") from None
+        if error.errno == errno.EEXIST:
+            raise ConnectorFileExistsError("File already exists.") from None
+        raise ConnectorOperationError("SFTP operation failed.") from None
+    except (paramiko.SSHException, paramiko.SFTPError, EOFError):
+        raise ConnectorOperationError("SFTP operation failed.") from None
+
+
+class SFTPConnector(Connector):
+    def __init__(
+        self,
+        host: str,
+        port: int,
+        username: str,
+        password: str,
+        *,
+        timeout: float = 10,
+    ) -> None:
+        self.host = host
+        self.port = port
+        self.username = username
+        self.password = password
+        self.timeout = timeout
+
+    @contextmanager
+    def _client(self) -> Iterator[paramiko.SFTPClient]:
+        with _sftp_errors():
+            ssh = paramiko.SSHClient()
+            ssh.load_system_host_keys()
+            ssh.set_missing_host_key_policy(paramiko.RejectPolicy())
+            try:
+                ssh.connect(
+                    hostname=self.host,
+                    port=self.port,
+                    username=self.username,
+                    password=self.password,
+                    timeout=self.timeout,
+                    banner_timeout=self.timeout,
+                    auth_timeout=self.timeout,
+                )
+                sftp = ssh.open_sftp()
+                try:
+                    yield sftp
+                finally:
+                    sftp.close()
+            finally:
+                ssh.close()
+
+    @staticmethod
+    def _resolve(path: str) -> str:
+        if not isinstance(path, str) or not path or "\x00" in path:
+            raise InvalidConnectorArgumentError("A relative file path is required.")
+        relative = PurePosixPath(path)
+        if relative.is_absolute() or ".." in relative.parts:
+            raise InvalidConnectorArgumentError(
+                "Path must stay within the home directory."
+            )
+        return relative.as_posix()
+
+    @staticmethod
+    def _entry(path: str, attributes: paramiko.SFTPAttributes) -> FileEntry | None:
+        mode = attributes.st_mode
+        if mode is None:
+            return None
+        if S_ISLNK(mode):
+            entry_type: Literal["directory", "file", "symlink"] = "symlink"
+        elif S_ISREG(mode):
+            entry_type = "file"
+        elif S_ISDIR(mode):
+            entry_type = "directory"
+        else:
+            return None
+        return {"path": path, "size": attributes.st_size, "type": entry_type}
+
+    def list(self, recursive: bool = False) -> list[FileEntry]:
+        if not isinstance(recursive, bool):
+            raise InvalidConnectorArgumentError("Recursive must be a boolean.")
+
+        with self._client() as sftp:
+
+            def entries(directory: str) -> Iterator[FileEntry]:
+                for attributes in sftp.listdir_attr(directory):
+                    name = attributes.filename
+                    if name in (".", ".."):
+                        continue
+                    path = f"{directory}/{name}" if directory != "." else name
+                    entry = self._entry(path, attributes)
+                    if entry is None:
+                        continue
+                    if entry["type"] == "directory" and recursive:
+                        yield from entries(path)
+                    else:
+                        yield entry
+
+            return sorted(entries("."), key=lambda entry: entry["path"])
+
+    def read(self, path: str) -> bytes:
+        resolved = self._resolve(path)
+        with self._client() as sftp:
+            with _sftp_errors(), sftp.open(resolved, "rb") as stream:
+                return stream.read()
+
+    def write(self, path: str, data: bytes, *, mode: WriteMode = "create") -> None:
+        resolved = self._resolve(path)
+        if not isinstance(data, bytes):
+            raise InvalidConnectorArgumentError("File data must be bytes.")
+        if mode not in ("create", "replace"):
+            raise InvalidConnectorArgumentError("Invalid file write mode.")
+        with self._client() as sftp:
+            with _sftp_errors():
+                if mode == "create":
+                    try:
+                        sftp.stat(resolved)
+                    except OSError as error:
+                        if error.errno != errno.ENOENT:
+                            raise
+                    else:
+                        raise ConnectorFileExistsError("File already exists.")
+                with sftp.open(resolved, "x" if mode == "create" else "r+b") as stream:
+                    stream.write(data)
+                    if mode == "replace":
+                        stream.truncate(len(data))
+
+    def head(self, path: str, lines: int = 10, max_bytes: int = 65536) -> bytes:
+        resolved = self._resolve(path)
+        if any(type(limit) is not int or limit <= 0 for limit in (lines, max_bytes)):
+            raise InvalidConnectorArgumentError(
+                "Head limits must be positive integers."
+            )
+        with self._client() as sftp:
+            with _sftp_errors(), sftp.open(resolved, "rb") as stream:
+                chunks = []
+                remaining = max_bytes
+                for _ in range(lines):
+                    chunk = stream.readline(remaining)
+                    if not chunk:
+                        break
+                    chunks.append(chunk)
+                    remaining -= len(chunk)
+                    if remaining == 0:
+                        break
+                return b"".join(chunks)
