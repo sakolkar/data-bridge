@@ -99,54 +99,60 @@ Run `bash ./curl-suite.sh` from the repository root for a basic menu of curl
 requests to `http://localhost:8000`. Choose an operation and enter the name
 and JSON body when prompted; choose `0` to quit.
 
-Use the singular `/connection` endpoint. Names are query parameters, never URL
-path segments or body fields. Clients must URL-encode query values exactly once;
+Use the singular `/connection` endpoint. POST requires `name` in the JSON body;
+GET, PUT, and DELETE use query parameters, never URL path segments.
+Clients must URL-encode query values exactly once;
 for example, `demo + data` becomes `demo%20%2B%20data`.
 
 | Request | Result |
 | --- | --- |
-| `POST /connection?name=...` | Create; returns 201 with name and type. |
+| `POST /connection` | Create with name in the body; returns 201 with name and type. |
 | `GET /connection` | List metadata ordered by case-sensitive name. |
 | `GET /connection?name=...` | Retrieve metadata for the exact name. |
 | `PUT /connection?name=...` | Replace all type/settings fields; returns 200. |
 | `DELETE /connection?name=...` | Delete; returns 204 without a body. |
 
 Names are nonblank, case-sensitive, and at most 128 characters. Spaces and
-Unicode are preserved; control characters are rejected. POST/PUT require a
-nonblank `type` of at most 64 characters and a string `settings`; extra
-body fields are rejected. PUT cannot rename a connection.
+Unicode are preserved; control characters are rejected. POST/PUT accept only
+implemented connector types; currently, only `type: "local"` is supported.
+Supply a string `path` instead of `settings`. It must be nonblank and contain no
+null characters;
+the home directory is not accessed or checked when saving configuration.
+Generic and unimplemented types return 422. Extra body fields are rejected.
+PUT cannot rename a connection and rejects `name` in the body.
 
 Settings are encrypted in SQLite and **write-only** over HTTP: list, detail,
 create, and replace responses contain only `name` and `type`. To replace
 settings, supply the complete new object; no merge or secret recovery endpoint
-is provided. Validation responses do not echo submitted settings.
+is provided. Local paths are serialized as `{"path":"..."}` in encrypted settings
+and are also write-only. Validation responses do not echo submitted values.
 
 Duplicate names return 409; absent connections return 404; invalid input returns
 422. Storage failures return a generic 500 and are logged without credentials.
 An explicitly blank name is invalid, not a request to list all connections.
 
 ```bash
-# Create generic configuration. This does not connect to a backend.
-curl -X POST 'http://localhost:8000/connection?name=demo%20%2B%20data' \
+# Configure a local connector without performing file operations.
+curl -X POST 'http://localhost:8000/connection' \
   -H 'Content-Type: application/json' \
-  -d '{"type":"custom","settings":"location=example"}'
-# {"name":"demo + data","type":"custom"}
+  -d '{"name":"local-files","type":"local","path":"/data"}'
+# {"name":"local-files","type":"local"}
 
 curl 'http://localhost:8000/connection'
-curl --get 'http://localhost:8000/connection' --data-urlencode 'name=demo + data'
+curl --get 'http://localhost:8000/connection' --data-urlencode 'name=local-files'
 
-curl -X PUT 'http://localhost:8000/connection?name=demo%20%2B%20data' \
+curl -X PUT 'http://localhost:8000/connection?name=local-files' \
   -H 'Content-Type: application/json' \
-  -d '{"type":"custom","settings":"location=replacement"}'
+  -d '{"type":"local","path":"/replacement"}'
 
-curl -X DELETE 'http://localhost:8000/connection?name=demo%20%2B%20data'
+curl -X DELETE 'http://localhost:8000/connection?name=local-files'
 ```
 
-Type strings and settings are currently generic: backend-specific validation and
-supported-type enforcement are deferred until concrete connectors are added.
-`ConnectionRecord` in `src/db/models.py` is the single SQLModel model used for
-request validation, database storage, and internal decrypted configurations.
-The API combines the query name with the body before validating the record.
+Local configuration is validated by `LocalConnectionConfiguration` in
+`src/routes/connection.py`; no generic configuration fallback is accepted.
+`ConnectionRecord` in `src/db/models.py` is the SQLModel model used for database
+storage and internal decrypted configurations. POST validates the body directly;
+PUT combines the query name with the body before validating the record.
 API responses are plain dictionaries containing only name and type;
 validation and storage errors use application-level exception handlers.
 Database table models live in `src/db/models.py`. The model-independent

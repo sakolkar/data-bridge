@@ -1,8 +1,9 @@
-from typing import Annotated
+import json
+from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from fastapi.exceptions import RequestValidationError
-from pydantic import ValidationError
+from pydantic import BaseModel, ConfigDict, ValidationError, field_validator
 
 from connection_store import ConnectionStore
 from db.models import ConnectionName, ConnectionRecord
@@ -18,22 +19,50 @@ Store = Annotated[ConnectionStore, Depends(get_store)]
 Name = Annotated[ConnectionName, Query()]
 
 
-def get_record(name: Name, body: dict[str, object]) -> ConnectionRecord:
-    if "name" in body:
-        raise HTTPException(422, "Name must be supplied as a query parameter.")
+class LocalConnectionConfiguration(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: ConnectionName
+    type: Literal["local"]
+    path: str
+
+    @field_validator("path")
+    @classmethod
+    def validate_path(cls, value: str) -> str:
+        if not value.strip() or "\x00" in value:
+            raise ValueError("Path must be nonblank and contain no null characters.")
+        return value
+
+
+def get_create_record(body: dict[str, object]) -> ConnectionRecord:
     try:
-        return ConnectionRecord.model_validate({**body, "name": name})
+        configuration = LocalConnectionConfiguration.model_validate(body)
+        return ConnectionRecord.model_validate(
+            {
+                "name": configuration.name,
+                "type": configuration.type,
+                "settings": json.dumps({"path": configuration.path}),
+            }
+        )
     except ValidationError as error:
         raise RequestValidationError(
             [{**item, "loc": ("body", *item["loc"])} for item in error.errors()]
         ) from None
 
 
+def get_record(name: Name, body: dict[str, object]) -> ConnectionRecord:
+    if "name" in body:
+        raise HTTPException(422, "Name must be supplied as a query parameter.")
+    return get_create_record({**body, "name": name})
+
+
 Record = Annotated[ConnectionRecord, Depends(get_record)]
 
 
 @router.post("", status_code=201)
-def create_connection(record: Record, store: Store) -> dict[str, str]:
+def create_connection(
+    record: Annotated[ConnectionRecord, Depends(get_create_record)], store: Store
+) -> dict[str, str]:
     return store.create(record)
 
 

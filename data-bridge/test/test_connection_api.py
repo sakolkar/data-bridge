@@ -1,3 +1,4 @@
+import json
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -17,25 +18,29 @@ def client(secret_key: str, sqlite_path: Path) -> Iterator[TestClient]:
 
 def test_configuration_crud(client: TestClient) -> None:
     params = {"name": "source"}
-    body = {"type": "custom", "settings": "password=private-value;port=22"}
-    expected = {"name": "source", "type": "custom"}
+    body = {"type": "local", "path": "password=private-value;port=22"}
+    expected = {"name": "source", "type": "local"}
+    body["name"] = "source"
 
     assert client.get("/connection").json() == []
-    created = client.post("/connection", params=params, json=body)
+    created = client.post("/connection", json=body)
     assert created.status_code == 201
     assert created.json() == expected
     assert client.get("/connection", params=params).json() == expected
     assert client.get("/connection").json() == [expected]
-    assert client.post("/connection", params=params, json=body).status_code == 409
+    assert client.post("/connection", json=body).status_code == 409
 
     replaced = client.put(
         "/connection",
         params=params,
-        json={"type": "another", "settings": "replacement"},
+        json={"type": "local", "path": "replacement"},
     )
     assert replaced.status_code == 200
-    assert replaced.json() == {"name": "source", "type": "another"}
-    assert app.state.connection_store.get("source").settings == "replacement"
+    assert replaced.json() == {"name": "source", "type": "local"}
+    assert (
+        json.loads(app.state.connection_store.get("source").settings)["path"]
+        == "replacement"
+    )
 
     deleted = client.delete("/connection", params=params)
     assert deleted.status_code == 204
@@ -52,7 +57,7 @@ def test_query_names_round_trip_without_double_decoding(
     client: TestClient, name: str
 ) -> None:
     response = client.post(
-        "/connection", params={"name": name}, json={"type": "custom", "settings": ""}
+        "/connection", json={"name": name, "type": "local", "path": "/data"}
     )
     assert response.status_code == 201
     assert response.json()["name"] == name
@@ -61,7 +66,7 @@ def test_query_names_round_trip_without_double_decoding(
     assert detail.json()["name"] == name
 
 
-@pytest.mark.parametrize("method", ["post", "get", "put", "delete"])
+@pytest.mark.parametrize("method", ["get", "put", "delete"])
 @pytest.mark.parametrize("name", ["", " \t", "x" * 129, "a\x00b", "a\nb"])
 def test_invalid_query_names_are_rejected(
     client: TestClient, method: str, name: str
@@ -70,7 +75,7 @@ def test_invalid_query_names_are_rejected(
         method,
         "/connection",
         params={"name": name},
-        json={"type": "custom", "settings": "password=private-value"},
+        json={"type": "local", "path": "password=private-value"},
     )
     assert response.status_code == 422
     assert "private-value" not in response.text
@@ -82,7 +87,7 @@ def test_name_is_required_for_mutations(client: TestClient, method: str) -> None
     response = client.request(
         method,
         "/connection",
-        json={"type": "custom", "settings": "password=private-value"},
+        json={"type": "local", "path": "password=private-value"},
     )
     assert response.status_code == 422
     assert "private-value" not in response.text
@@ -94,7 +99,7 @@ def test_unknown_connections_return_not_found(client: TestClient, method: str) -
         method,
         "/connection",
         params={"name": "missing"},
-        json={"type": "custom", "settings": ""},
+        json={"type": "local", "path": "/data"},
     )
     assert response.status_code == 404
     assert response.json() == {"detail": "Connection not found."}
@@ -103,24 +108,24 @@ def test_unknown_connections_return_not_found(client: TestClient, method: str) -
 @pytest.mark.parametrize(
     "body",
     [
-        {"settings": "password=private-value"},
-        {"type": "", "settings": "password=private-value"},
-        {"type": " ", "settings": "password=private-value"},
-        {"type": "x" * 65, "settings": "password=private-value"},
-        {"type": "custom"},
-        {"type": "custom", "settings": {"password": "private-value"}},
-        {"type": "custom", "settings": ["private-value"]},
-        {"type": "custom", "settings": None},
-        {"type": "custom", "settings": 22},
+        {"path": "password=private-value"},
+        {"type": "", "path": "password=private-value"},
+        {"type": " ", "path": "password=private-value"},
+        {"type": "x" * 65, "path": "password=private-value"},
+        {"type": "local"},
+        {"type": "local", "path": {"password": "private-value"}},
+        {"type": "local", "path": ["private-value"]},
+        {"type": "local", "path": None},
+        {"type": "local", "path": 22},
         {
-            "type": "custom",
-            "settings": "password=private-value",
-            "name": "body-name",
+            "type": "local",
+            "path": "password=private-value",
+            "extra": "unexpected",
         },
     ],
 )
-def test_body_validation_does_not_echo_settings(client: TestClient, body: dict) -> None:
-    response = client.post("/connection", params={"name": "source"}, json=body)
+def test_body_validation_does_not_echo_path(client: TestClient, body: dict) -> None:
+    response = client.post("/connection", json={"name": "source", **body})
     assert response.status_code == 422
     assert "private-value" not in response.text
     assert client.get("/connection").json() == []
@@ -129,23 +134,137 @@ def test_body_validation_does_not_echo_settings(client: TestClient, body: dict) 
 def test_invalid_json_does_not_echo_secrets(client: TestClient) -> None:
     response = client.post(
         "/connection",
-        params={"name": "source"},
-        content='{"type":"custom","settings":{"password":"private-value",}}',
+        content='{"name":"source","type":"local","path":{"password":"private-value",}}',
         headers={"Content-Type": "application/json"},
     )
     assert response.status_code == 422
     assert "private-value" not in response.text
 
 
-def test_nonfinite_settings_are_rejected(client: TestClient) -> None:
+def test_nonfinite_path_values_are_rejected(client: TestClient) -> None:
+    response = client.post(
+        "/connection",
+        content='{"name":"source","type":"local","path":{"password":"private-value","number":NaN}}',
+        headers={"Content-Type": "application/json"},
+    )
+    assert response.status_code == 422
+    assert "private-value" not in response.text
+
+
+def test_create_requires_name_in_body(client: TestClient) -> None:
     response = client.post(
         "/connection",
         params={"name": "source"},
-        content='{"type":"custom","settings":{"password":"private-value","number":NaN}}',
-        headers={"Content-Type": "application/json"},
+        json={"type": "local", "path": "private-value"},
+    )
+    assert response.status_code == 422
+    assert response.json()["detail"][0]["loc"] == ["body", "name"]
+    assert "private-value" not in response.text
+    assert client.get("/connection").json() == []
+
+
+@pytest.mark.parametrize("method", ["post", "put"])
+@pytest.mark.parametrize(
+    "fields",
+    [
+        {"type": "generic", "settings": "private-value"},
+        {"type": "custom", "settings": "private-value"},
+        {"type": "sftp", "path": "/data"},
+        {"type": "LOCAL", "path": "/data"},
+    ],
+)
+def test_unimplemented_connection_types_are_rejected(
+    client: TestClient, method: str, fields: dict[str, str]
+) -> None:
+    original = {"name": "source", "type": "local", "path": "/original"}
+    assert client.post("/connection", json=original).status_code == 201
+    body = dict(fields)
+    if method == "post":
+        body["name"] = "unsupported"
+    response = client.request(
+        method, "/connection", params={"name": "source"}, json=body
+    )
+    assert response.status_code == 422
+    assert any(item["loc"] == ["body", "type"] for item in response.json()["detail"])
+    assert "private-value" not in response.text
+    assert client.get("/connection").json() == [{"name": "source", "type": "local"}]
+    assert json.loads(app.state.connection_store.get("source").settings) == {
+        "path": "/original"
+    }
+
+
+def test_local_configuration_crud(client: TestClient, tmp_path: Path) -> None:
+    home = str(tmp_path / "local home")
+    body = {"name": "local-files", "type": "local", "path": home}
+    expected = {"name": "local-files", "type": "local"}
+    params = {"name": "local-files"}
+
+    created = client.post("/connection", json=body)
+    assert created.status_code == 201
+    assert created.json() == expected
+    assert json.loads(app.state.connection_store.get("local-files").settings) == {
+        "path": home
+    }
+    assert client.post("/connection", json=body).status_code == 409
+    assert client.get("/connection", params=params).json() == expected
+    assert client.get("/connection").json() == [expected]
+
+    replacement = str(tmp_path / "replacement")
+    updated = client.put(
+        "/connection", params=params, json={"type": "local", "path": replacement}
+    )
+    assert updated.status_code == 200
+    assert updated.json() == expected
+    assert json.loads(app.state.connection_store.get("local-files").settings) == {
+        "path": replacement
+    }
+    assert client.delete("/connection", params=params).status_code == 204
+
+
+@pytest.mark.parametrize(
+    "fields",
+    [
+        {},
+        {"path": ""},
+        {"path": " \t"},
+        {"path": "private-value\x00"},
+        {"path": None},
+        {"path": 22},
+        {"path": {"password": "private-value"}},
+        {"path": "/data", "settings": "private-value"},
+        {"path": "/data", "extra": "private-value"},
+        {"settings": "private-value"},
+    ],
+)
+@pytest.mark.parametrize("method", ["post", "put"])
+def test_invalid_local_configuration(
+    client: TestClient, fields: dict[str, object], method: str
+) -> None:
+    body = {"type": "local", **fields}
+    if method == "post":
+        body["name"] = "local-files"
+    response = client.request(
+        method, "/connection", params={"name": "local-files"}, json=body
     )
     assert response.status_code == 422
     assert "private-value" not in response.text
+    assert client.get("/connection").json() == []
+
+
+def test_local_configuration_persists_encrypted(
+    secret_key: str, sqlite_path: Path
+) -> None:
+    home = "/private-home-for-local-connector"
+    with TestClient(app) as client:
+        response = client.post(
+            "/connection", json={"name": "local-files", "type": "local", "path": home}
+        )
+        assert response.status_code == 201
+    assert home.encode() not in sqlite_path.read_bytes()
+    with TestClient(app):
+        assert json.loads(app.state.connection_store.get("local-files").settings) == {
+            "path": home
+        }
 
 
 def test_store_errors_are_logged_without_secrets(
@@ -171,15 +290,18 @@ def test_configuration_persists_through_new_lifespan(
     with TestClient(app) as first:
         response = first.post(
             "/connection",
-            params={"name": "persisted"},
-            json={"type": "custom", "settings": "password=private-value"},
+            json={
+                "name": "persisted",
+                "type": "local",
+                "path": "password=private-value",
+            },
         )
         assert response.status_code == 201
     with TestClient(app) as restarted:
         response = restarted.get("/connection", params={"name": "persisted"})
         assert response.status_code == 200
-        assert response.json() == {"name": "persisted", "type": "custom"}
+        assert response.json() == {"name": "persisted", "type": "local"}
         assert (
-            app.state.connection_store.get("persisted").settings
+            json.loads(app.state.connection_store.get("persisted").settings)["path"]
             == "password=private-value"
         )

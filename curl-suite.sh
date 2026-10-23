@@ -13,15 +13,14 @@ while true; do
             curl -i --url-query "name=$name" http://localhost:8000/connection
             ;;
         3)
-            IFS= read -r -p 'Name: ' name || break
-            IFS= read -r -p 'Body JSON ({"type":"custom","settings":""}): ' body || break
-            curl -i -X POST --url-query "name=$name" \
+            IFS= read -r -p 'Body JSON ({"name":"example","type":"local","path":"/data"}): ' body || break
+            curl -i -X POST \
                 -H 'Content-Type: application/json' -d "$body" \
                 http://localhost:8000/connection
             ;;
         4)
             IFS= read -r -p 'Name: ' name || break
-            IFS= read -r -p 'Body JSON ({"type":"custom","settings":""}): ' body || break
+            IFS= read -r -p 'Body JSON ({"type":"local","path":"/data"}): ' body || break
             curl -i -X PUT --url-query "name=$name" \
                 -H 'Content-Type: application/json' -d "$body" \
                 http://localhost:8000/connection
