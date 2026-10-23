@@ -1,4 +1,11 @@
 from abc import ABC, abstractmethod
+from typing import Literal, TypedDict
+
+
+class FileEntry(TypedDict):
+    path: str
+    size: int
+    type: Literal["directory", "file", "symlink"]
 
 
 class Connector(ABC):
@@ -11,9 +18,13 @@ class Connector(ABC):
     """
 
     @abstractmethod
-    def list(self) -> list[str]:
+    def list(self, recursive: bool = False) -> list[FileEntry]:
         """
-        Return available files as relative logical path strings.
+        Return relative paths, byte sizes, and entry types.
+
+        Recursive listings include descendants but omit directory entries.
+        Symlinks are listed without following them; sizes describe the entry,
+        not its target.
         """
 
     @abstractmethod

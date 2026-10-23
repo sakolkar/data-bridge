@@ -43,6 +43,9 @@ ASGI application after exporting the key above:
 python -m pip install -r requirements.txt
 export DATABRIDGE_SQLITE_PATH="$PWD/.databridge/db.sqlite"
 uvicorn app:app --app-dir src --host 0.0.0.0 --port 8000
+
+DATABRIDGE_SECRET_KEY=LGV0e84Z6Dyv1zXPyrjUnW75clrMQQ8LINNNaLtvTKQ= DATABRIDGE_SQLITE_PATH=/workspaces/data-bridge/dbridge.sqlite uvicorn app:app --app-dir src --host 0.
+0.0.0 --port 8000
 ```
 
 ## Run tests
@@ -57,12 +60,12 @@ Tests supply temporary configuration; no real key or database is needed.
 
 ## Connector contract
 
-`data-bridge/src/connector.py` defines the transport-independent `Connector`
+`data-bridge/src/connector/__init__.py` defines the transport-independent `Connector`
 abstract class:
 
 | Operation | Contract |
 | --- | --- |
-| `list()` | Return connector-relative file paths as strings. |
+| `list(recursive=False)` | Return objects with relative `path`, byte `size`, and `type` (`directory`, `file`, or `symlink`); recursive listings omit directory entries. |
 | `read(path)` | Return the complete file as bytes. |
 | `write(path, data)` | Create or replace a file with bytes. |
 | `head(path, lines=10, max_bytes=65536)` | Return a bounded prefix, limited by LF-delimited lines and bytes. |
@@ -75,8 +78,18 @@ failures without depending on HTTP.
 All application-defined exceptions live in `data-bridge/src/exceptions.py` and
 derive from `DatabridgeException`.
 
-Concrete local/SFTP connectors, file-operation routes, connector resolution,
-transfers, and schema inference are not implemented yet.
+`LocalConnector(path=...)` in `data-bridge/src/connector/local.py` uses an existing
+directory as its home. Listing returns entry objects sorted by relative path.
+Nonrecursive listings include directories; recursive listings include files and
+symlinks from all subdirectories, but not directory entries. Symbolic links are
+listed without following them, including broken links. Sizes are filesystem
+entry sizes in bytes (`lstat`), not target sizes or recursive directory totals.
+Reads, writes, and head operations reject absolute paths,
+parent traversal, and symbolic links that resolve outside the home. Writes
+create or replace files; parent directories must already exist.
+
+SFTP connectors, file-operation routes, connector resolution, transfers, and
+schema inference are not implemented yet.
 
 ## Connection configuration API
 
