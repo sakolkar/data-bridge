@@ -2,7 +2,7 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
 from stat import S_ISDIR, S_ISLNK, S_ISREG
-from typing import Literal
+from typing import Annotated, Literal
 
 from connector import Connector, FileEntry, WriteMode
 from exceptions import (
@@ -11,6 +11,27 @@ from exceptions import (
     ConnectorOperationError,
     InvalidConnectorArgumentError,
 )
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+ConnectionName = Annotated[str, Field(min_length=1, max_length=128)]
+
+
+class LocalConnectionSettings(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    path: str
+
+    @field_validator("path")
+    @classmethod
+    def validate_path(cls, value: str) -> str:
+        if not value.strip() or "\x00" in value:
+            raise ValueError("Path must be nonblank and contain no null characters.")
+        return value
+
+
+class LocalConnectionConfiguration(LocalConnectionSettings):
+    name: ConnectionName
+    type: Literal["local"]
 
 
 @contextmanager

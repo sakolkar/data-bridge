@@ -6,6 +6,7 @@ from fastapi.testclient import TestClient
 
 from app import app
 from connector.local import LocalConnector
+from db.models import ConnectionRecord
 from exceptions import ConnectorOperationError
 
 
@@ -192,6 +193,17 @@ def test_unknown_connection_returns_not_found(client: TestClient) -> None:
     )
     assert response.status_code == 404
     assert response.json() == {"detail": "Connection not found."}
+
+
+def test_unsupported_connector_type_is_rejected(client: TestClient) -> None:
+    app.state.connection_store.create(
+        ConnectionRecord(name="future", type="future", settings="{}")
+    )
+    response = client.get(
+        "/connection/file", params={"name": "future", "action": "list"}
+    )
+    assert response.status_code == 422
+    assert response.json() == {"detail": "Unsupported connection type."}
 
 
 @pytest.mark.parametrize("settings", ["private-value", "[]", '{"path":22}'])

@@ -7,29 +7,24 @@ from fastapi.responses import JSONResponse
 from pydantic import ValidationError
 
 from connector import Connector
-from connector.local import LocalConnector
-from exceptions import ConnectorOperationError, InvalidConnectorArgumentError
-from routes.connection import LocalConnectionConfiguration, Name, Store
+from connector.registry import create_connector
+from exceptions import ConnectorOperationError
+from routes.connection import Name, Store
 
 router = APIRouter(prefix="/connection/file")
 
 
 def get_connector(name: Name, store: Store) -> Connector:
     record = store.get(name)
-    if record.type != "local":
-        raise InvalidConnectorArgumentError("Unsupported connection type.")
     try:
         settings = json.loads(record.settings)
         if not isinstance(settings, dict):
             raise ConnectorOperationError("Stored connection configuration is invalid.")
-        configuration = LocalConnectionConfiguration.model_validate(
-            {**settings, "name": record.name, "type": record.type}
-        )
+        return create_connector(record.type, settings)
     except (json.JSONDecodeError, ValidationError):
         raise ConnectorOperationError(
             "Stored connection configuration is invalid."
         ) from None
-    return LocalConnector(configuration.path)
 
 
 FileConnector = Annotated[Connector, Depends(get_connector)]

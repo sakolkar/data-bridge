@@ -1,11 +1,12 @@
 import json
-from typing import Annotated, Literal
+from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from fastapi.exceptions import RequestValidationError
-from pydantic import BaseModel, ConfigDict, ValidationError, field_validator
+from pydantic import ValidationError
 
 from connection_store import ConnectionStore
+from connector.local import LocalConnectionConfiguration
 from db.models import ConnectionName, ConnectionRecord
 
 router = APIRouter(prefix="/connection")
@@ -17,21 +18,6 @@ def get_store(request: Request) -> ConnectionStore:
 
 Store = Annotated[ConnectionStore, Depends(get_store)]
 Name = Annotated[ConnectionName, Query()]
-
-
-class LocalConnectionConfiguration(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    name: ConnectionName
-    type: Literal["local"]
-    path: str
-
-    @field_validator("path")
-    @classmethod
-    def validate_path(cls, value: str) -> str:
-        if not value.strip() or "\x00" in value:
-            raise ValueError("Path must be nonblank and contain no null characters.")
-        return value
 
 
 def get_create_record(body: dict[str, object]) -> ConnectionRecord:
