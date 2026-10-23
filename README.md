@@ -2,8 +2,8 @@
 
 ## Configuration
 
-The service reads two required environment variables once at startup. There is no
-configuration file or automatic default:
+The service requires two environment variables before the application is
+imported. There is no configuration file or automatic default:
 
 | Variable | Value |
 | --- | --- |
@@ -18,14 +18,19 @@ export DATABRIDGE_SECRET_KEY="$(python -c 'import base64, secrets; print(base64.
 
 Keep this key private and backed up securely, and supply the **same key** on
 subsequent starts. Do not regenerate it each time or commit it to the repository.
-It is reserved for future encryption of sensitive database fields, not encryption
-of the entire SQLite file. Encryption and database persistence are not implemented yet.
+It encrypts connection settings with Fernet, not the entire SQLite file.
+Names and types remain readable in the database. Changing or losing the key
+prevents decryption of existing settings; key rotation is not implemented.
+The encrypted field currently returns `[DECRYPTION_FAILED]` when decryption
+fails.
 
 Startup validates the key and file path, creates missing database parent
 directories, and fails clearly on invalid configuration or directory-creation
 errors. Existing database files are opened read-only and checked for SQLite
 integrity; unreadable, invalid, or corrupt databases cause startup to fail.
-Missing database files are not created, and existing database contents are left unchanged.
+After validation, the SQLModel connection store creates a missing database and
+its own table. Saved configurations survive restarts; unrelated tables are left
+unchanged. Configuration validation by itself does not create a database.
 There is no base-directory restriction: choose a path the service can access.
 Restart the service after changing configuration.
 
@@ -50,6 +55,101 @@ pytest
 
 Tests supply temporary configuration; no real key or database is needed.
 
+## Connector contract
+
+`data-bridge/src/connector.py` defines the transport-independent `Connector`
+abstract class:
+
+| Operation | Contract |
+| --- | --- |
+| `list()` | Return connector-relative file paths as strings. |
+| `read(path)` | Return the complete file as bytes. |
+| `write(path, data)` | Create or replace a file with bytes. |
+| `head(path, lines=10, max_bytes=65536)` | Return a bounded prefix, limited by LF-delimited lines and bytes. |
+
+Paths are logical names relative to a connector, not host-specific absolute
+paths. Both head limits must be positive; the byte limit may truncate a line.
+Implementations must read only a bounded prefix for head, not the entire file.
+Connector errors distinguish missing files, invalid arguments, and operational
+failures without depending on HTTP.
+All application-defined exceptions live in `data-bridge/src/exceptions.py` and
+derive from `DatabridgeException`.
+
+Concrete local/SFTP connectors, file-operation routes, connector resolution,
+transfers, and schema inference are not implemented yet.
+
+## Connection configuration API
+
+Connection routes are defined in `data-bridge/src/routes/connection.py`.
+
+Run `bash ./curl-suite.sh` from the repository root for a basic menu of curl
+requests to `http://localhost:8000`. Choose an operation and enter the name
+and JSON body when prompted; choose `0` to quit.
+
+Use the singular `/connection` endpoint. Names are query parameters, never URL
+path segments or body fields. Clients must URL-encode query values exactly once;
+for example, `demo + data` becomes `demo%20%2B%20data`.
+
+| Request | Result |
+| --- | --- |
+| `POST /connection?name=...` | Create; returns 201 with name and type. |
+| `GET /connection` | List metadata ordered by case-sensitive name. |
+| `GET /connection?name=...` | Retrieve metadata for the exact name. |
+| `PUT /connection?name=...` | Replace all type/settings fields; returns 200. |
+| `DELETE /connection?name=...` | Delete; returns 204 without a body. |
+
+Names are nonblank, case-sensitive, and at most 128 characters. Spaces and
+Unicode are preserved; control characters are rejected. POST/PUT require a
+nonblank `type` of at most 64 characters and a string `settings`; extra
+body fields are rejected. PUT cannot rename a connection.
+
+Settings are encrypted in SQLite and **write-only** over HTTP: list, detail,
+create, and replace responses contain only `name` and `type`. To replace
+settings, supply the complete new object; no merge or secret recovery endpoint
+is provided. Validation responses do not echo submitted settings.
+
+Duplicate names return 409; absent connections return 404; invalid input returns
+422. Storage failures return a generic 500 and are logged without credentials.
+An explicitly blank name is invalid, not a request to list all connections.
+
+```bash
+# Create generic configuration. This does not connect to a backend.
+curl -X POST 'http://localhost:8000/connection?name=demo%20%2B%20data' \
+  -H 'Content-Type: application/json' \
+  -d '{"type":"custom","settings":"location=example"}'
+# {"name":"demo + data","type":"custom"}
+
+curl 'http://localhost:8000/connection'
+curl --get 'http://localhost:8000/connection' --data-urlencode 'name=demo + data'
+
+curl -X PUT 'http://localhost:8000/connection?name=demo%20%2B%20data' \
+  -H 'Content-Type: application/json' \
+  -d '{"type":"custom","settings":"location=replacement"}'
+
+curl -X DELETE 'http://localhost:8000/connection?name=demo%20%2B%20data'
+```
+
+Type strings and settings are currently generic: backend-specific validation and
+supported-type enforcement are deferred until concrete connectors are added.
+`ConnectionRecord` in `src/db/models.py` is the single SQLModel model used for
+request validation, database storage, and internal decrypted configurations.
+The API combines the query name with the body before validating the record.
+API responses are plain dictionaries containing only name and type;
+validation and storage errors use application-level exception handlers.
+Database table models live in `src/db/models.py`. The model-independent
+`Database` class in `src/db/db.py` owns the engine,
+schema initialization, transactional SQLModel sessions, and cleanup. The app
+keeps the database on `app.state.database` and manages its startup and shutdown;
+the connection store receives only its session factory. The connection store
+handles connection queries and storage error translation, retaining SQLAlchemy's
+SQLite conflict handling. The model uses `EncryptedString` from `src/db/fields.py`
+to transparently encrypt and decrypt settings as strings. New values are stored
+as text Fernet tokens; older binary tokens need conversion to text before they
+can be read by this field.
+The API does not execute file operations or verify connectivity. Authentication
+and authorization are not implemented; do not expose this service to untrusted
+clients.
+
 ## Run with Docker Compose
 
 From the repository root, with `DATABRIDGE_SECRET_KEY` exported:
@@ -60,6 +160,6 @@ docker compose up --build
 
 The API container listens on port `8000`. Compose supplies the absolute database
 path `/var/lib/databridge/db.sqlite` and mounts its parent directory in the
-`databridge-data` named volume so future database contents survive container
+`databridge-data` named volume so saved configurations survive container
 recreation. The key is passed at runtime, never baked into the image. Missing keys
 cause Compose to fail before starting containers.

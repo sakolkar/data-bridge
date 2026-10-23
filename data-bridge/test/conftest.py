@@ -1,7 +1,23 @@
 from pathlib import Path
+from tempfile import TemporaryDirectory
 
 import pytest
 from cryptography.fernet import Fernet
+
+from config import Settings
+
+# The encrypted field reads configuration during import.
+with pytest.MonkeyPatch.context() as environment, TemporaryDirectory() as directory:
+    environment.setenv("DATABRIDGE_SECRET_KEY", Fernet.generate_key().decode("ascii"))
+    environment.setenv("DATABRIDGE_SQLITE_PATH", str(Path(directory) / "db.sqlite"))
+    import db.fields as encrypted_fields
+
+
+@pytest.fixture(autouse=True)
+def field_settings(
+    monkeypatch: pytest.MonkeyPatch, secret_key: str, sqlite_path: Path
+) -> None:
+    monkeypatch.setattr(encrypted_fields, "settings", Settings(sqlite_path, secret_key))
 
 
 @pytest.fixture

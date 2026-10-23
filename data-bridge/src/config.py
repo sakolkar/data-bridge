@@ -10,8 +10,7 @@ from pathlib import Path
 from cryptography.fernet import Fernet
 
 
-class ConfigurationError(ValueError):
-    pass
+from exceptions import ConfigurationError
 
 
 @dataclass(frozen=True)
@@ -20,16 +19,17 @@ class Settings:
     secret_key: str = field(repr=False)
 
 
-def _required_environment(name: str) -> str:
+def _required_env(name: str) -> str:
     value = os.environ.get(name)
     if value is None or not value.strip():
         raise ConfigurationError(f"{name} must be set to a non-blank value.")
     return value
-    
+
 
 def _validate_secret_key(key: str) -> None:
     try:
         Fernet(key.encode())
+        return key
     except (ValueError, TypeError):
         raise ConfigurationError(
             "DATABRIDGE_SECRET_KEY must be a valid Fernet key."
@@ -40,7 +40,9 @@ def _validate_database_path(value: str) -> Path:
     try:
         path = Path(value)
         if not path.is_absolute():
-            raise ConfigurationError("DATABRIDGE_SQLITE_PATH must be an absolute file path.")
+            raise ConfigurationError(
+                "DATABRIDGE_SQLITE_PATH must be an absolute file path."
+            )
         path = path.resolve()
         try:
             mode = path.stat().st_mode
@@ -67,9 +69,8 @@ def _validate_database_path(value: str) -> Path:
 
 
 def load_settings() -> Settings:
-    secret_key = _required_environment("DATABRIDGE_SECRET_KEY")
-    _validate_secret_key(secret_key)
-    sqlite_path = _validate_database_path(_required_environment("DATABRIDGE_SQLITE_PATH"))
+    secret_key = _validate_secret_key(_required_env("DATABRIDGE_SECRET_KEY"))
+    sqlite_path = _validate_database_path(_required_env("DATABRIDGE_SQLITE_PATH"))
     return Settings(sqlite_path=sqlite_path, secret_key=secret_key)
 
 

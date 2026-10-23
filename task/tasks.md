@@ -20,14 +20,15 @@ Tasks are ordered by prerequisite. Complete all **Required** tasks through Phase
 
 **Description**
 - Read the required `DATABRIDGE_SECRET_KEY` and `DATABRIDGE_SQLITE_PATH` environment variables at application startup, without defaults.
-- Validate a Fernet-compatible key and an absolute SQLite file path, and prepare missing database parent directories without opening SQLite.
+- Validate a Fernet-compatible key and an absolute SQLite file path, check existing databases read-only for SQLite integrity, and prepare missing database parent directories.
 - Keep configuration separate from route and connector implementation.
 
 **Acceptance criteria**
 - The service starts with documented environment configuration and exposes immutable settings through application lifespan state.
 - Missing/blank values, invalid keys, relative database paths, directory targets, and storage preparation failures produce clear startup errors without revealing the key.
 - The database location is configurable without changing code and is not restricted to a base directory.
-- Startup creates missing parent directories but does not create/open the database or alter an existing database file.
+- Configuration validation creates missing parent directories and checks existing databases read-only, without creating a missing database or altering existing contents.
+- The connection store initializes its database/table separately during startup as part of task 1.3.
 - Importing the application does not require configuration or perform filesystem writes.
 - Encryption, database persistence, and connector file-root configuration remain separate tasks.
 
@@ -45,13 +46,19 @@ Tasks are ordered by prerequisite. Complete all **Required** tasks through Phase
 ### Task 1.1 - Define connection and connector models (Required)
 
 **Description**
-- Define the connection configuration fields and the common connector contract for `list`, `read`, and `write`.
+- Define the connection configuration fields and the common connector contract for `list`, `read`, `write`, and bounded `head`.
 - Keep connector operations independent of the HTTP layer.
 
 **Acceptance criteria**
 - Connection configuration represents at least a unique name, type, and type-specific settings.
 - The connector contract specifies the inputs and outputs/errors for listing files, reading bytes, and writing bytes.
 - The contract does not expose local-filesystem-only behavior.
+- `head` returns initial bytes bounded by positive line and byte limits without reading the entire file; parsing and schema inference are separate tasks.
+
+**Implementation scope**
+- Generic models and the abstract connector contract are implemented without concrete backends.
+- This increment also brings forward SQLModel-backed SQLite configuration CRUD and encrypted write-only settings from tasks 1.3, 1.4, and B.3.
+- The singular `/connection` API accepts URL-encoded names in query parameters. Generic type strings/settings are accepted; type-specific validation and supported-type enforcement remain deferred.
 
 ### Task 1.2 - Implement local filesystem connector (Required)
 
@@ -78,6 +85,10 @@ Tasks are ordered by prerequisite. Complete all **Required** tasks through Phase
 - Duplicate names and unsupported connection types are rejected explicitly.
 - Secrets such as passwords are not returned in ordinary connection-list/detail responses.
 
+**Current increment**
+- Generic configuration persistence and full CRUD are implemented with SQLModel; settings are encrypted with the configured Fernet key.
+- Unsupported-type rejection remains pending until concrete connectors and resolution are implemented.
+
 ### Task 1.4 - Add local connection creation and retrieval API (Required)
 
 **Description**
@@ -88,6 +99,10 @@ Tasks are ordered by prerequisite. Complete all **Required** tasks through Phase
 - A valid local connection request is persisted and returns a useful success response.
 - The API can retrieve/list the connection after creation.
 - Missing fields, invalid names, and duplicate names return clear client errors rather than stack traces.
+
+**Current increment**
+- Generic create/list/retrieve/replace/delete routes are available at `/connection`, with `name` in the query string.
+- Local-specific configuration validation remains pending; these routes do not yet instantiate or verify a local connector.
 
 ### Task 1.5 - Add connector resolution for saved connections (Required)
 

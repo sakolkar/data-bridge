@@ -3,3 +3,4 @@
 /copilot-sessions
 /venv
 **/.databridge/
+/*.sqlite

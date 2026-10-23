@@ -6,13 +6,15 @@ from pathlib import Path
 
 import pytest
 
-from config import ConfigurationError, load_settings, prepare_storage
-
+from config import load_settings, prepare_storage
+from exceptions import ConfigurationError
 
 pytestmark = pytest.mark.usefixtures("secret_key", "sqlite_path")
 
 
-def test_loading_settings_does_not_create_storage(secret_key: str, sqlite_path: Path) -> None:
+def test_loading_settings_does_not_create_storage(
+    secret_key: str, sqlite_path: Path
+) -> None:
     settings = load_settings()
 
     assert settings.sqlite_path == sqlite_path
@@ -64,14 +66,18 @@ def test_invalid_database_path(monkeypatch: pytest.MonkeyPatch, value: str) -> N
         load_settings()
 
 
-def test_directory_target_is_rejected(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+def test_directory_target_is_rejected(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     monkeypatch.setenv("DATABRIDGE_SQLITE_PATH", str(tmp_path))
 
     with pytest.raises(ConfigurationError, match="regular file"):
         load_settings()
 
 
-def test_symlink_loop_is_rejected(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+def test_symlink_loop_is_rejected(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     link = tmp_path / "loop"
     link.symlink_to(link)
     monkeypatch.setenv("DATABRIDGE_SQLITE_PATH", str(link))
@@ -119,7 +125,9 @@ def test_invalid_existing_database_is_rejected(
         sqlite_path.write_bytes(b"not a SQLite database")
     original = sqlite_path.read_bytes()
 
-    with pytest.raises(ConfigurationError, match="DATABRIDGE_SQLITE_PATH.*valid SQLite"):
+    with pytest.raises(
+        ConfigurationError, match="DATABRIDGE_SQLITE_PATH.*valid SQLite"
+    ):
         if during_preparation:
             prepare_storage(settings)
         else:
