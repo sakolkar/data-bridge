@@ -27,7 +27,9 @@ def test_configuration_crud(client: TestClient) -> None:
     assert created.status_code == 201
     assert created.json() == expected
     assert client.get("/connection", params=params).json() == expected
-    assert client.get("/connection").json() == [expected]
+    assert client.get("/connection").json() == [
+        {**expected, "settings": {"path": body["path"]}}
+    ]
     assert client.post("/connection", json=body).status_code == 409
 
     replaced = client.put(
@@ -187,7 +189,9 @@ def test_unimplemented_connection_types_are_rejected(
     assert response.status_code == 422
     assert any(item["loc"] == ["body", "type"] for item in response.json()["detail"])
     assert "private-value" not in response.text
-    assert client.get("/connection").json() == [{"name": "source", "type": "local"}]
+    assert client.get("/connection").json() == [
+        {"name": "source", "type": "local", "settings": {"path": "/original"}}
+    ]
     assert json.loads(app.state.connection_store.get("source").settings) == {
         "path": "/original"
     }
@@ -207,7 +211,9 @@ def test_local_configuration_crud(client: TestClient, tmp_path: Path) -> None:
     }
     assert client.post("/connection", json=body).status_code == 409
     assert client.get("/connection", params=params).json() == expected
-    assert client.get("/connection").json() == [expected]
+    assert client.get("/connection").json() == [
+        {**expected, "settings": {"path": home}}
+    ]
 
     replacement = str(tmp_path / "replacement")
     updated = client.put(

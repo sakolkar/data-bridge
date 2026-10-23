@@ -277,7 +277,10 @@ def test_existing_encrypted_text_database_is_compatible(
             store = ConnectionStore(storage.session)
             store.initialize()
             assert store.get("source").settings == "password=private-value"
-            assert store.list()[0] == {"name": "source", "type": "custom"}
+            listed = store.list()[0]
+            assert listed["name"] == "source"
+            assert listed["type"] == "custom"
+            assert listed["settings"] == store.get("source").settings
             store.replace(
                 ConnectionRecord(name="source", type="updated", settings="port=22")
             )

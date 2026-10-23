@@ -108,7 +108,7 @@ for example, `demo + data` becomes `demo%20%2B%20data`.
 | Request | Result |
 | --- | --- |
 | `POST /connection` | Create with name in the body; returns 201 with name and type. |
-| `GET /connection` | List metadata ordered by case-sensitive name. |
+| `GET /connection` | List connections with decrypted settings, ordered by case-sensitive name. |
 | `GET /connection?name=...` | Retrieve metadata for the exact name. |
 | `PUT /connection?name=...` | Replace all type/settings fields; returns 200. |
 | `DELETE /connection?name=...` | Delete; returns 204 without a body. |
@@ -122,11 +122,12 @@ the home directory is not accessed or checked when saving configuration.
 Generic and unimplemented types return 422. Extra body fields are rejected.
 PUT cannot rename a connection and rejects `name` in the body.
 
-Settings are encrypted in SQLite and **write-only** over HTTP: list, detail,
-create, and replace responses contain only `name` and `type`. To replace
-settings, supply the complete new object; no merge or secret recovery endpoint
-is provided. Local paths are serialized as `{"path":"..."}` in encrypted settings
-and are also write-only. Validation responses do not echo submitted values.
+Settings are encrypted in SQLite and returned decrypted in the connection list.
+Each list entry contains `name`, `type`, and `settings` as a JSON object;
+single-connection detail and create/replace responses contain only `name` and
+`type`. To replace settings, supply the complete new object; no merge endpoint
+is provided. Local paths are serialized as `{"path":"..."}` in encrypted
+settings. Validation responses do not echo submitted values.
 
 Duplicate names return 409; absent connections return 404; invalid input returns
 422. Storage failures return a generic 500 and are logged without credentials.

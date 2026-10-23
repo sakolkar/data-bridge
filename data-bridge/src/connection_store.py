@@ -47,11 +47,12 @@ class ConnectionStore:
     def list(self) -> list[dict[str, str]]:
         with self._session() as session:
             rows = session.exec(
-                select(ConnectionRecord.name, ConnectionRecord.type).order_by(
-                    ConnectionRecord.name
-                )
+                select(ConnectionRecord).order_by(ConnectionRecord.name)
             ).all()
-        return [{"name": row.name, "type": row.type} for row in rows]
+        return [
+            {"name": row.name, "type": row.type, "settings": row.settings}
+            for row in rows
+        ]
 
     def get_metadata(self, name: str) -> dict[str, str]:
         with self._session() as session:

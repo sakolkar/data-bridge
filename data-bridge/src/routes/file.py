@@ -57,6 +57,7 @@ def get_file(
     return Response(content=data, media_type="application/octet-stream")
 
 
+# TODO: support Transfer-Encoding: chunked
 @router.post("", status_code=201)
 @router.put("", status_code=204)
 async def write_file(

@@ -69,9 +69,12 @@ def create_connection(
 @router.get("")
 def get_connection(
     store: Store, name: Annotated[ConnectionName | None, Query()] = None
-) -> dict[str, str] | list[dict[str, str]]:
+) -> dict[str, str] | list[dict[str, object]]:
     if name is None:
-        return store.list()
+        return [
+            {**record, "settings": json.loads(record["settings"])}
+            for record in store.list()
+        ]
     return store.get_metadata(name)
 
 
