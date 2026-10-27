@@ -8,6 +8,7 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from sqlalchemy.exc import SQLAlchemyError
+from sqlmodel import SQLModel
 
 from app import app
 from controllers.connection import ConnectionController
@@ -34,8 +35,6 @@ def test_successful_startup(
     with TestClient(app) as client:
         database = app.state.database
         assert isinstance(database, Database)
-        assert app.state.settings.secret_key == secret_key
-        assert app.state.settings.sqlite_path == sqlite_path
         assert sqlite_path.parent.is_dir()
         assert sqlite_path.is_file()
         assert client.get("/connection").json() == []
@@ -102,14 +101,14 @@ def test_database_initialization_failure_closes_database(
     closed = []
     original_close = Database.close
 
-    def fail_initialization(self: Database) -> None:
+    def fail_initialization(engine: object) -> None:
         raise SQLAlchemyError("Cannot initialize database.")
 
     def track_close(self: Database) -> None:
         original_close(self)
         closed.append(self)
 
-    monkeypatch.setattr(Database, "initialize", fail_initialization)
+    monkeypatch.setattr(SQLModel.metadata, "create_all", fail_initialization)
     monkeypatch.setattr(Database, "close", track_close)
     with pytest.raises(ConnectionStoreError, match="initialize"):
         with TestClient(app):

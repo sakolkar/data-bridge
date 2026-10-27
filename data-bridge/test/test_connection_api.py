@@ -339,7 +339,7 @@ def test_store_errors_are_logged_without_secrets(
         del app.dependency_overrides[get_controller]
     assert response.status_code == 500
     assert response.json() == {"detail": "Connection storage is unavailable."}
-    assert "Connection storage operation failed." in caplog.text
+    assert "Request failed." in caplog.text
     assert "private-value" not in caplog.text
 
 

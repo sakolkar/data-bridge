@@ -1,10 +1,18 @@
+import logging
 import threading
+import time
 from collections.abc import Callable, Iterator
 from itertools import chain
 from typing import Literal
 
 from connector import Connector
-from exceptions import ConnectorError
+from controllers.transfer import TransferController
+from db.models import TransferRecord
+from exceptions import ConnectorError, ConnectorPermissionError, TransferStoreError
+
+logger = logging.getLogger(__name__)
+
+PROGRESS_INTERVAL = 1.0
 
 TransferSide = Literal["source", "destination"]
 
@@ -68,3 +76,80 @@ def transfer_file(
             raise TransferStepError("destination", error) from error
     finally:
         reader.close()
+
+
+def _failure_message(error: TransferStepError, record: TransferRecord) -> str:
+    if error.side == "source":
+        action = "reading"
+        target = f"source '{record.source}:{record.source_file}'"
+    else:
+        action = "writing"
+        target = f"destination '{record.destination}:{record.destination_file}'"
+    if isinstance(error.error, ConnectorPermissionError):
+        return f"Permission denied {action} {target}. {error.error}"
+    return f"Failed {action} {target}. {error.error}"
+
+
+def run_transfer(
+    transfers: TransferController,
+    record: TransferRecord,
+    source: Connector,
+    destination: Connector,
+    stop: threading.Event,
+) -> None:
+    transfer_id = record.id
+    logger.info("Transfer %s started.", transfer_id)
+    last_saved = time.monotonic()
+
+    def save_progress(byte_count: int) -> None:
+        # Throttled so large transfers don't write to the database per chunk.
+        nonlocal last_saved
+        now = time.monotonic()
+        if now - last_saved >= PROGRESS_INTERVAL:
+            try:
+                transfers.update_progress(transfer_id, byte_count)
+            except TransferStoreError:
+                logger.warning("Could not record progress of transfer %s.", transfer_id)
+            last_saved = now
+
+    try:
+        byte_count = transfer_file(
+            source,
+            record.source_file,
+            destination,
+            record.destination_file,
+            on_progress=save_progress,
+            stop=stop,
+        )
+    except TransferCancelledError as error:
+        logger.warning(
+            "Transfer %s stopped by shutdown after %d bytes; destination '%s:%s' may be incomplete.",
+            transfer_id,
+            error.bytes_transferred,
+            record.destination,
+            record.destination_file,
+        )
+        transfers.fail(
+            transfer_id,
+            "Transfer was stopped because the service shut down. The destination "
+            "file may be incomplete; remove it before starting the transfer again.",
+            error.bytes_transferred,
+        )
+        return
+    except TransferStepError as error:
+        message = _failure_message(error, record)
+        logger.warning(
+            "Transfer %s failed on %s (%s): %s",
+            transfer_id,
+            error.side,
+            type(error.error).__name__,
+            message,
+        )
+        transfers.fail(transfer_id, message)
+        return
+    except Exception:
+        logger.exception("Unexpected failure in transfer %s.", transfer_id)
+        transfers.fail(transfer_id, "Transfer failed.")
+        return
+    transfers.complete(transfer_id, byte_count)
+    logger.info("Transfer %s completed (%d bytes).", transfer_id, byte_count)

@@ -4,6 +4,7 @@ class DatabridgeException(Exception):
     """
 
     default_message = "DataBridge operation failed."
+    status_code = 500
 
     def __init__(self, message: str | None = None) -> None:
         super().__init__(message or self.default_message)
@@ -29,6 +30,7 @@ class DuplicateConnectionError(ConnectionStoreError):
     """
 
     default_message = "Connection already exists."
+    status_code = 409
 
 
 class ConnectionNotFoundError(ConnectionStoreError):
@@ -37,6 +39,7 @@ class ConnectionNotFoundError(ConnectionStoreError):
     """
 
     default_message = "Connection not found."
+    status_code = 404
 
 
 class TransferStoreError(DatabridgeException):
@@ -53,6 +56,7 @@ class TransferNotFoundError(TransferStoreError):
     """
 
     default_message = "Transfer not found."
+    status_code = 404
 
 
 class ConnectorError(DatabridgeException):
@@ -69,6 +73,7 @@ class ConnectorFileNotFoundError(ConnectorError):
     """
 
     default_message = "File not found."
+    status_code = 404
 
 
 class ConnectorFileExistsError(ConnectorError):
@@ -77,12 +82,15 @@ class ConnectorFileExistsError(ConnectorError):
     """
 
     default_message = "File already exists."
+    status_code = 409
 
 
 class InvalidConnectorArgumentError(ConnectorError):
     """
     A logical path or operation argument is invalid.
     """
+
+    status_code = 422
 
 
 class ConnectorOperationError(ConnectorError):
@@ -96,8 +104,12 @@ class ConnectorPermissionError(ConnectorOperationError):
     The storage backend denied access to the requested path.
     """
 
+    status_code = 403
+
 
 class ConnectorUnavailableError(ConnectorOperationError):
     """
     The backend could not be reached or rejected the configured credentials.
     """
+
+    status_code = 502

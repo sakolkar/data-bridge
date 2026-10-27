@@ -477,7 +477,7 @@ def test_progress_is_reported_while_the_transfer_runs(
     client, local_home, _, _ = transfer_client
     content = bytes(range(256)) * 1024
     (local_home / "large.bin").write_bytes(content)
-    monkeypatch.setattr("routes.transfer.PROGRESS_INTERVAL", 0)
+    monkeypatch.setattr("controllers.file_transfer.PROGRESS_INTERVAL", 0)
     second_write = threading.Event()
     release = threading.Event()
     record_write = FakeRemoteFile.write_chunk_size

@@ -45,7 +45,7 @@ def _filesystem_errors() -> Iterator[None]:
         raise ConnectorFileExistsError() from None
     except PermissionError:
         raise ConnectorPermissionError(
-            "Permission denied by the local filesystem. Check that the service " "user can access the path."
+            "Permission denied by the local filesystem. Check that the service user can access the path."
         ) from None
     except OSError:
         raise ConnectorOperationError("Local file operation failed.") from None

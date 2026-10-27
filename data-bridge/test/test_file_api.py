@@ -233,7 +233,7 @@ def test_invalid_saved_configuration_is_not_exposed(
     )
     assert response.status_code == 500
     assert response.json() == {"detail": "File operation failed."}
-    assert "Connector operation failed." in caplog.text
+    assert "Request failed." in caplog.text
     assert "private-value" not in caplog.text
 
 
@@ -252,7 +252,7 @@ def test_file_operation_errors_are_not_exposed(
     )
     assert response.status_code == 500
     assert response.json() == {"detail": "File operation failed."}
-    assert "Connector operation failed." in caplog.text
+    assert "Request failed." in caplog.text
     assert "private-value" not in caplog.text
 
 

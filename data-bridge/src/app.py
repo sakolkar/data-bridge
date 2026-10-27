@@ -1,4 +1,3 @@
-import asyncio
 import logging
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
@@ -6,30 +5,17 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
-from sqlalchemy.exc import SQLAlchemyError
 
 from config import load_settings, prepare_storage
 from controllers.connection import ConnectionController
+from controllers.transfer import TransferController
+from controllers.transfer_manager import TransferManager
 from db import fields
 from db.db import Database
-from exceptions import (
-    ConnectionNotFoundError,
-    ConnectionStoreError,
-    ConnectorError,
-    ConnectorFileExistsError,
-    ConnectorFileNotFoundError,
-    ConnectorPermissionError,
-    ConnectorUnavailableError,
-    DuplicateConnectionError,
-    InvalidConnectorArgumentError,
-    TransferNotFoundError,
-    TransferStoreError,
-)
+from exceptions import DatabridgeException
 from routes.connection import router as connection_router
 from routes.file import router as file_router
 from routes.transfer import router as transfer_router
-from controllers.transfer_manager import TransferManager
-from controllers.transfer import TransferController
 
 logger = logging.getLogger(__name__)
 
@@ -44,10 +30,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     database = Database(settings.sqlite_path)
     app.state.database = database
     try:
-        try:
-            database.initialize()
-        except SQLAlchemyError:
-            raise ConnectionStoreError("Cannot initialize connection storage.") from None
+        database.initialize()
         connection_controller = ConnectionController(database.session)
         connection_controller.initialize()
         transfer_controller = TransferController(database.session)
@@ -55,7 +38,6 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
         interrupted = transfer_controller.fail_interrupted()
         if interrupted:
             logger.warning("Marked %d interrupted transfer(s) as failed.", interrupted)
-        app.state.settings = settings
         app.state.connection_controller = connection_controller
         app.state.transfer_controller = transfer_controller
         manager = TransferManager(TRANSFER_WORKERS)
@@ -65,35 +47,11 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
             yield
         finally:
             try:
-                await _shutdown_transfers(manager, transfer_controller)
+                await manager.shutdown(transfer_controller)
             finally:
                 manager.restore_signal_handlers()
     finally:
         database.close()
-
-
-async def _shutdown_transfers(manager: TransferManager, transfer_controller: TransferController) -> None:
-    cancelled = manager.cancel_queued()
-    for transfer_id in cancelled:
-        transfer_controller.fail(
-            transfer_id,
-            "Transfer was cancelled because the service shut down before it " "started. Start it again.",
-        )
-    if cancelled:
-        logger.warning("Cancelled %d queued transfer(s) that had not started.", len(cancelled))
-
-    running = manager.running
-    if running and not manager.stopping:
-        hint = " Interrupt again to stop them." if manager.interrupted else ""
-        logger.warning(
-            "Waiting for %d running transfer(s) to finish before shutting down.%s",
-            running,
-            hint,
-        )
-
-    await asyncio.to_thread(manager.wait)
-    if running:
-        logger.warning("All transfers have ended; shutdown can continue.")
 
 
 app = FastAPI(title="DataBridge", lifespan=lifespan)
@@ -113,41 +71,11 @@ async def validation_error_handler(request: Request, error: RequestValidationErr
     return JSONResponse(status_code=422, content={"detail": details})
 
 
-@app.exception_handler(ConnectionStoreError)
-async def connection_error_handler(request: Request, error: ConnectionStoreError) -> JSONResponse:
-    if isinstance(error, DuplicateConnectionError):
-        return JSONResponse(status_code=409, content={"detail": str(error)})
-    if isinstance(error, ConnectionNotFoundError):
-        return JSONResponse(status_code=404, content={"detail": str(error)})
-    logger.error("Connection storage operation failed.")
-    return JSONResponse(status_code=500, content={"detail": ConnectionStoreError.default_message})
-
-
-@app.exception_handler(TransferStoreError)
-async def transfer_store_error_handler(request: Request, error: TransferStoreError) -> JSONResponse:
-    if isinstance(error, TransferNotFoundError):
-        return JSONResponse(status_code=404, content={"detail": str(error)})
-    logger.error("Transfer storage operation failed.")
-    return JSONResponse(status_code=500, content={"detail": TransferStoreError.default_message})
-
-
-@app.exception_handler(ConnectorError)
-async def connector_error_handler(request: Request, error: ConnectorError) -> JSONResponse:
-    if isinstance(error, ConnectorFileNotFoundError):
-        return JSONResponse(status_code=404, content={"detail": str(error)})
-    if isinstance(error, ConnectorFileExistsError):
-        return JSONResponse(status_code=409, content={"detail": str(error)})
-    if isinstance(error, InvalidConnectorArgumentError):
-        return JSONResponse(status_code=422, content={"detail": str(error)})
-    if isinstance(error, ConnectorPermissionError):
-        return JSONResponse(status_code=403, content={"detail": str(error)})
-    if isinstance(error, ConnectorUnavailableError):
+@app.exception_handler(DatabridgeException)
+async def databridge_error_handler(request: Request, error: DatabridgeException) -> JSONResponse:
+    if error.status_code == 500:
+        logger.error("Request failed. %s %s raised %s.", request.method, request.url.path, type(error).__name__)
+        return JSONResponse(status_code=500, content={"detail": error.default_message})
+    if error.status_code == 502:
         logger.warning("Connector unavailable. %s %s: %s", request.method, request.url.path, error)
-        return JSONResponse(status_code=502, content={"detail": str(error)})
-    logger.error(
-        "Connector operation failed. %s %s raised %s.",
-        request.method,
-        request.url.path,
-        type(error).__name__,
-    )
-    return JSONResponse(status_code=500, content={"detail": ConnectorError.default_message})
+    return JSONResponse(status_code=error.status_code, content={"detail": str(error)})

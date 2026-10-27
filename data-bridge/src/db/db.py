@@ -2,7 +2,10 @@ from contextlib import contextmanager
 from pathlib import Path
 
 from sqlalchemy import URL
+from sqlalchemy.exc import SQLAlchemyError
 from sqlmodel import Session, SQLModel, create_engine
+
+from exceptions import ConnectionStoreError
 
 
 class Database:
@@ -14,7 +17,10 @@ class Database:
         )
 
     def initialize(self):
-        SQLModel.metadata.create_all(self._engine)
+        try:
+            SQLModel.metadata.create_all(self._engine)
+        except SQLAlchemyError:
+            raise ConnectionStoreError("Cannot initialize connection storage.") from None
 
     @contextmanager
     def session(self):

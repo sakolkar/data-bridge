@@ -53,7 +53,9 @@ def _payload(record: ConnectionRecord) -> dict[str, object]:
 
 
 @router.post("", status_code=201)
-def create_connection(record: Annotated[ConnectionRecord, Depends(get_create_record)], controller: Controller) -> dict[str, str]:
+def create_connection(
+    record: Annotated[ConnectionRecord, Depends(get_create_record)], controller: Controller
+) -> dict[str, str]:
     controller.create(record)
     return _summary(record)
 

@@ -65,7 +65,7 @@ def _sftp_errors(path: str | None = None) -> Iterator[None]:
         ) from None
     except paramiko.BadHostKeyException:
         raise ConnectorUnavailableError(
-            "SFTP host key verification failed. Verify the server host key and " "the service user's known_hosts file."
+            "SFTP host key verification failed. Verify the server host key and the service user's known_hosts file."
         ) from None
     except NoValidConnectionsError:
         raise ConnectorUnavailableError(
@@ -93,21 +93,7 @@ def _sftp_errors(path: str | None = None) -> Iterator[None]:
                 error.strerror,
             )
             target = f" to '{path}'" if path else ""
-            raise ConnectorPermissionError(
-                f"The SFTP server denied access{target}. The account lacks "
-                "permission for this path; on chrooted servers the home "
-                "directory itself is often read-only, so use a writable "
-                "subdirectory or fix the remote permissions."
-            ) from None
-        if error.errno in (
-            errno.ECONNREFUSED,
-            errno.ETIMEDOUT,
-            errno.EHOSTUNREACH,
-            errno.ENETUNREACH,
-        ):
-            raise ConnectorUnavailableError(
-                "Could not reach the SFTP server. Check the host, port, and " "whether the server is running."
-            ) from None
+            raise ConnectorPermissionError(f"The SFTP server denied access{target}.") from None
         logger.warning(
             "SFTP file operation on %r failed (errno=%s): %s",
             path,
@@ -117,15 +103,15 @@ def _sftp_errors(path: str | None = None) -> Iterator[None]:
         raise ConnectorOperationError("SFTP file operation failed. Check the remote path and permissions.") from None
     except paramiko.SSHException:
         raise ConnectorUnavailableError(
-            "The SSH handshake failed. Verify that the server supports SSH/SFTP " "and that its host key is trusted."
+            "The SSH handshake failed. Verify that the server supports SSH/SFTP and that its host key is trusted."
         ) from None
     except EOFError:
         raise ConnectorUnavailableError(
-            "The SFTP server closed the connection unexpectedly. Check server " "availability."
+            "The SFTP server closed the connection unexpectedly. Check server availability."
         ) from None
     except paramiko.SFTPError:
         raise ConnectorOperationError(
-            "The SFTP server rejected the operation. Check the remote path and " "permissions."
+            "The SFTP server rejected the operation. Check the remote path and permissions."
         ) from None
 
 
@@ -259,6 +245,7 @@ class SFTPConnector(Connector):
         with self._client() as sftp:
             with _sftp_errors(resolved):
                 if mode == "create":
+                    # Some servers report an exclusive-create conflict as a generic failure.
                     try:
                         sftp.stat(resolved)
                     except OSError as error:

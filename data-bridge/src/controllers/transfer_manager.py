@@ -6,6 +6,8 @@ from collections.abc import Callable
 from concurrent.futures import Future, ThreadPoolExecutor, wait
 from types import FrameType
 
+from controllers.transfer import TransferController
+
 logger = logging.getLogger(__name__)
 
 _STOP_SIGNALS = (signal.SIGINT, signal.SIGTERM)
@@ -32,6 +34,9 @@ class TransferManager:
                 self._running.add(transfer_id)
             try:
                 run()
+            except Exception:
+                # Recording the outcome failed; the next startup marks the transfer as interrupted.
+                logger.exception("Could not record the outcome of transfer %s.", transfer_id)
             finally:
                 with self._lock:
                     self._running.discard(transfer_id)
@@ -109,3 +114,26 @@ class TransferManager:
         previous = self._previous_handlers.get(sig)
         if callable(previous):
             previous(sig, frame)
+
+    async def shutdown(self, transfers: TransferController) -> None:
+        cancelled = self.cancel_queued()
+        for transfer_id in cancelled:
+            transfers.fail(
+                transfer_id,
+                "Transfer was cancelled because the service shut down before it started. Start it again.",
+            )
+        if cancelled:
+            logger.warning("Cancelled %d queued transfer(s) that had not started.", len(cancelled))
+
+        running = self.running
+        if running and not self.stopping:
+            hint = " Interrupt again to stop them." if self.interrupted else ""
+            logger.warning(
+                "Waiting for %d running transfer(s) to finish before shutting down.%s",
+                running,
+                hint,
+            )
+
+        await asyncio.to_thread(self.wait)
+        if running:
+            logger.warning("All transfers have ended; shutdown can continue.")
