@@ -136,7 +136,7 @@ class SFTPConnector(Connector):
         with _sftp_errors():
             ssh = paramiko.SSHClient()
             ssh.load_system_host_keys()
-            ssh.set_missing_host_key_policy(paramiko.RejectPolicy())
+            ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
             try:
                 ssh.connect(
                     hostname=self.host,

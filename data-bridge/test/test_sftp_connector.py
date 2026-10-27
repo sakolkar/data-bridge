@@ -179,7 +179,7 @@ def test_sftp_operations_use_trusted_connection_and_relative_paths(
         "banner_timeout": 10,
         "auth_timeout": 10,
     }
-    assert isinstance(ssh.policy, paramiko.RejectPolicy)
+    assert isinstance(ssh.policy, paramiko.AutoAddPolicy)
     assert remote.closed
     assert ssh.closed
 

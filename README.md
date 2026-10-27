@@ -37,14 +37,107 @@ Restart the service after changing configuration.
 ## Run locally
 
 From the `data-bridge` directory, install the application dependencies and start the
-ASGI application after exporting the key above:
+ASGI application like follows. Be sure to update the example secret key after generating
+it from the instructions above.
 
 ```bash
+cd ./data-bridge
+
 python -m pip install -r requirements.txt
-export DATABRIDGE_SQLITE_PATH="$PWD/.databridge/db.sqlite"
-uvicorn app:app --app-dir src --host 0.0.0.0 --port 8000
 
 DATABRIDGE_SECRET_KEY=LGV0e84Z6Dyv1zXPyrjUnW75clrMQQ8LINNNaLtvTKQ= DATABRIDGE_SQLITE_PATH=/workspaces/data-bridge/dbridge.sqlite uvicorn app:app --app-dir src --host 0.0.0.0 --port 8000
+```
+
+
+## Run with Docker Compose
+
+From the repository root, with `DATABRIDGE_SECRET_KEY` exported:
+
+
+```bash
+docker compose up --build
+```
+
+The API container listens on port `8000`. Compose supplies the absolute database
+path `/var/lib/databridge/db.sqlite` and bind-mounts its parent directory from
+`.databridge/local` so saved configurations survive container
+recreation.
+
+Within Compose, the API reaches the SFTP service at `sftp:22`; port `8822` is only
+the host-published port. Exposing port `8822` on the container does not change
+the SSH listener. If `sftp:22` times out despite a listening server, check Docker
+bridge forwarding and host firewall rules, try running `fix_codespace_iptables.sh`
+for GitHub codespaces.
+
+
+## API operations
+
+The examples assume the service is at `http://localhost:8000` and use the
+connection examples from `docker-compose.yml`. Add `-i` to show response
+status and headers. For an interactive menu of these calls, run
+`./curl-suite.sh` (set `DATABRIDGE_URL` to override the base URL).
+
+### Connections
+
+```bash
+# Create a connection (201)
+curl -X POST -H 'Content-Type: application/json' \
+    -d '{"name":"b","type":"local","path":"/var/lib/databridge"}' \
+    http://localhost:8000/connection
+
+curl -X POST -H 'Content-Type: application/json' \
+    -d '{"name":"a","type":"sftp","host":"sftp","port":22,"username":"testuser","password":"testpass"}' \
+    http://localhost:8000/connection
+
+# List all connections
+curl http://localhost:8000/connection
+
+# Get one connection
+curl 'http://localhost:8000/connection?name=b'
+
+# Replace a connection; the name goes in the query, not the body
+curl -X PUT -H 'Content-Type: application/json' \
+    -d '{"type":"local","path":"/data"}' \
+    'http://localhost:8000/connection?name=b'
+
+# Delete a connection (204)
+curl -X DELETE 'http://localhost:8000/connection?name=b'
+```
+
+### Files
+
+```bash
+# List files (optionally recursive)
+curl 'http://localhost:8000/connection/file?name=b&action=list&recursive=true'
+
+# Read a file
+curl -o example.txt 'http://localhost:8000/connection/file?name=b&action=read&path=example.txt'
+
+# Head a file (defaults: lines=10, max_bytes=65536)
+curl 'http://localhost:8000/connection/file?name=b&action=head&path=example.txt&lines=5&max_bytes=1024'
+
+# Create a new file (201)
+curl -X POST -H 'Content-Type: application/octet-stream' --data-binary @example.txt \
+    'http://localhost:8000/connection/file?name=b&action=write&path=example.txt'
+
+# Replace an existing file (204)
+curl -X PUT -H 'Content-Type: application/octet-stream' --data-binary @example.txt \
+    'http://localhost:8000/connection/file?name=b&action=write&path=example.txt'
+```
+
+URL-encode query values containing special characters, for example with
+`curl -G --data-urlencode 'path=my file.txt' ...`.
+
+### Transfers
+
+```bash
+# Start a transfer (202); the response includes the transfer ID and a Location header
+curl -X POST -H 'Content-Type: application/json' \
+    -d '{"source":"b","source_file":"example.txt","destination":"a","destination_file":"data/example.txt"}' \
+    http://localhost:8000/transfer
+
+# Get transfer status
+curl 'http://localhost:8000/transfer?transfer_id=<transfer-id>'
 ```
 
 ## Run tests
@@ -57,264 +150,54 @@ pytest
 
 Tests supply temporary configuration; no real key or database is needed.
 
-## Connector contract
 
-`data-bridge/src/connector/__init__.py` defines the transport-independent `Connector`
-abstract class:
+---
 
-| Operation | Contract |
-| --- | --- |
-| `list(recursive=False)` | Return objects with relative `path`, byte `size`, and `type` (`directory`, `file`, or `symlink`); recursive listings omit directory entries. |
-| `read(path)` | Return the complete file as bytes. |
-| `write(path, data, mode="create")` | Create a file exclusively, or use `mode="replace"` to replace an existing file. |
-| `iter_read(path, chunk_size=65536)` | Yield file data in bounded chunks for transfers. |
-| `write_chunks(path, chunks, mode="create")` | Write chunks and return the number of bytes written. |
-| `head(path, lines=10, max_bytes=65536)` | Return a bounded prefix, limited by LF-delimited lines and bytes. |
+## Implemented Features
 
-Paths are logical names relative to a connector, not host-specific absolute
-paths. Both head limits must be positive; the byte limit may truncate a line.
-Implementations must read only a bounded prefix for head, not the entire file.
-Connector errors distinguish missing files, existing-file conflicts, invalid arguments, and operational
-failures without depending on HTTP.
-All application-defined exceptions live in `data-bridge/src/exceptions.py` and
-derive from `DatabridgeException`.
+1. Local & SFTP Connector API to create, list, get, replace, delete connectors
 
-`LocalConnector(path=...)` in `data-bridge/src/connector/local.py` uses an existing
-directory as its home. Listing returns entry objects sorted by relative path.
-Nonrecursive listings include directories; recursive listings include files and
-symlinks from all subdirectories, but not directory entries. Symbolic links are
-listed without following them, including broken links. Sizes are filesystem
-entry sizes in bytes (`lstat`), not target sizes or recursive directory totals.
-Reads, writes, and head operations reject absolute paths,
-parent traversal, and symbolic links that resolve outside the home. Writes
-create or replace files; parent directories must already exist.
+1. Connector Persistence with a SQLite database
 
-SFTP connectors support the same file operations. Transfers copy bytes without
-parsing or transforming them; schema inference is not implemented yet.
+1. Connector interface (`list`, `read`, `write`, `head`, plus chunked `read_chunks`/`write_chunks`) implemented by both the local filesystem and SFTP connectors
 
-## Connection configuration API
+1. File API to list (optionally recursive), read, head (limited by lines and bytes), create, and replace files through any connection
 
-Connection routes are defined in `data-bridge/src/routes/connection.py`.
+1. Path safety: file paths are relative to the connection's home directory and cannot escape it via `..`, absolute paths, or symlinks
 
-Run `bash ./curl-suite.sh` from the repository root for a basic menu of curl
-requests to `http://localhost:8000` (override with `DATABRIDGE_URL`). It covers
-connection CRUD, file list/read/head/create/replace, and transfer creation/status
-lookup; enter values when prompted, and choose `0` to quit. File writes upload
-a local source file as raw bytes; reads can print to the terminal or save to a
-local file.
+1. Data-agnostic transfers between any two connections (local ↔ SFTP, or same type), with no connector-specific logic in the transfer pipeline
 
-Use the singular `/connection` endpoint. POST requires `name` in the JSON body;
-GET, PUT, and DELETE use query parameters, never URL path segments.
-Clients must URL-encode query values exactly once;
-for example, `demo + data` becomes `demo%20%2B%20data`.
+1. Asynchronous transfers run on a background worker pool; `POST /transfer` returns `202` with a transfer ID and `Location` header
 
-| Request | Result |
-| --- | --- |
-| `POST /connection` | Create with name in the body; returns 201 with name and type. |
-| `GET /connection` | List connections with their settings, ordered by case-sensitive name. |
-| `GET /connection?name=...` | Retrieve the connection with the exact name. |
-| `PUT /connection?name=...` | Replace all type/settings fields; returns 200. |
-| `DELETE /connection?name=...` | Delete; returns 204 without a body. |
+1. Transfer status tracking via the API: state, started/completed timestamps, bytes transferred (with periodic progress updates), and failure messages
 
-Names are nonblank, case-sensitive, and at most 128 characters. Spaces and
-Unicode are preserved; control characters are rejected. POST/PUT accept only
-implemented connector types: `local` and `sftp`. Local connections require a
-nonblank `path` with no null characters; the home directory is not accessed or
-checked when saving configuration. SFTP connections require `host`, `port`
-(1-65535), `username`, and `password`. Extra body fields are rejected.
-PUT cannot rename a connection and rejects `name` in the body.
+1. Streaming I/O so files are transferred in chunks rather than fully loaded into memory
 
-Settings are encrypted in SQLite and returned decrypted, including SFTP
-passwords. List entries and single-connection responses both contain `name`,
-`type`, and `settings` as a JSON object; create/replace responses contain only
-`name` and `type`. To replace settings, supply the complete new object; no merge endpoint
-is provided. Local paths are serialized as `{"path":"..."}` in encrypted
-settings. SFTP credentials are encrypted at rest. Validation responses do not
-echo submitted values.
+1. Graceful shutdown: running transfers are stopped and queued ones cancelled on shutdown, and transfers interrupted by a restart are marked as failed on startup
 
-Duplicate names return 409; absent connections return 404; invalid input returns
-422. Storage failures return a generic 500 and are logged without credentials.
-An explicitly blank name is invalid, not a request to list all connections.
+1. Encryption of stored connection settings (including credentials) at rest using Fernet
 
-```bash
-# Configure a local connector without performing file operations.
-curl -X POST 'http://localhost:8000/connection' \
-  -H 'Content-Type: application/json' \
-  -d '{"name":"local-files","type":"local","path":"/data"}'
-# {"name":"local-files","type":"local"}
+1. Startup validation of configuration and SQLite database integrity
 
-curl 'http://localhost:8000/connection'
-curl --get 'http://localhost:8000/connection' --data-urlencode 'name=local-files'
+1. Clear error responses with appropriate status codes (e.g. `404` missing connection/file, `409` duplicate connection/existing file, `422` invalid input, `403` permission denied, `502` SFTP server unreachable or bad credentials) without leaking stack traces or credentials
 
-curl -X PUT 'http://localhost:8000/connection?name=local-files' \
-  -H 'Content-Type: application/json' \
-  -d '{"type":"local","path":"/replacement"}'
+1. OpenAPI/Swagger UI docs served by FastAPI at `/docs`, however, these do not list the schemas of the requests and responses.
 
-curl -X DELETE 'http://localhost:8000/connection?name=local-files'
+1. Unit tests for the connectors, controllers, database, configuration, and API routes
 
-# Configure an SFTP connector. Its host key must already be trusted in the
-# service user's SSH known_hosts file.
-curl -X POST 'http://localhost:8000/connection' \
-  -H 'Content-Type: application/json' \
-  -d '{"name":"sftp-files","type":"sftp","host":"sftp","port":22,"username":"testuser","password":"<password>"}'
+1. Docker Compose setup running the service alongside an SFTP server, plus an interactive `curl-suite.sh` for exercising the API
 
-curl --get 'http://localhost:8000/connection/file' \
-  --data-urlencode 'name=sftp-files' --data-urlencode 'action=list'
-```
 
-The example uses the Compose network address `sftp:22`. If the API runs directly
-on the host instead, use `localhost:8822` and trust `[localhost]:8822` in that
-service user's SSH known_hosts file. Saving a connection does not open an SFTP
-session; a file operation does. The API process, not curl, needs network access
-and the trusted host key.
+## Future Enhancements
 
-Connector configuration and construction are registered in
-`src/connector/registry.py`; each connector type provides its own validated
-settings model and factory.
-`ConnectionRecord` in `src/db/models.py` is the SQLModel model used for database
-storage and internal decrypted configurations. POST validates the body directly;
-PUT combines the query name with the body before validating the record.
-API responses are plain dictionaries containing only name and type;
-validation and storage errors use application-level exception handlers.
-Database table models live in `src/db/models.py`. The model-independent
-`Database` class in `src/db/db.py` owns the engine,
-schema initialization, transactional SQLModel sessions, and cleanup. The app
-keeps the database on `app.state.database` and manages its startup and shutdown;
-the connection store receives only its session factory. The connection store
-handles connection queries and storage error translation, retaining SQLAlchemy's
-SQLite conflict handling. The model uses `EncryptedString` from `src/db/fields.py`
-to transparently encrypt and decrypt settings as strings. New values are stored
-as text Fernet tokens; older binary tokens need conversion to text before they
-can be read by this field.
-Saving connection configuration does not verify connectivity. Authentication and
-authorization are not implemented; do not expose this service to untrusted clients.
+Given more time, these are items that I would add to the service
 
-## File I/O API
+1. Complete the Phase 3 implementation. Would like to add json handling using `jq` for more efficient memory usage to parse a large json file.
 
-`/connection/file` resolves a saved connection using the required `name` query
-parameter. The required `action` selects the operation:
+1. FastAPI includes OpenAPI spec docs at the `/docs` endpoint. However, these are very bare for request & response schemas. With additional time, I would detail out the request & response schemas for better documentation about using the API.
 
-| Request | Result |
-| --- | --- |
-| `GET /connection/file?name=...&action=list` | JSON array of entry objects; `recursive=false` by default. |
-| `GET /connection/file?name=...&action=read&path=...` | Complete file as raw bytes. |
-| `GET /connection/file?name=...&action=head&path=...` | Raw prefix; defaults to `lines=10` and `max_bytes=65536`, both positive. |
-| `POST /connection/file?name=...&action=write&path=...` | Create a file; returns 201 with no body, or 409 if the entry exists. |
-| `PUT /connection/file?name=...&action=write&path=...` | Replace an existing file; returns 204, or 404 if it is missing. |
+1. The project scope did not include the feature to delete files from a connection. However, during testing, it is handy to want to delete a file occasionally.
 
-File paths are relative to the connection home and must be URL-encoded exactly
-once. Listing starts at the home directory and does not accept `path`.
-Read and head responses use `application/octet-stream` and identify the file
-with `Content-Disposition: inline; filename*=UTF-8''<name>` and a URL-encoded
-`X-File-Path` header. Backend connection or authentication failures return
-`502` with a descriptive message, and permission denials return `403`.
-POST and PUT write the
-raw request body as-is, regardless of Content-Type; JSON, text, and binary data
-are not parsed or transformed. Empty bodies create or truncate to an empty file.
-Parent directories must already exist. Reads and writes currently buffer
-contents in memory rather than streaming.
+1. The service would benefit from authentication and that split into at least two layers. One level of authentication that would allow creating & managing connections. Another that can use existing connections to manage files & transfers. Without authentication the servers behind the connections are fully exposed to anyone with network access to the webservice.
 
-Missing connections or files return 404; invalid actions, paths, and limits
-return 422. Operational failures return a generic 500 and are logged without
-file contents or configuration values.
-
-```bash
-curl --get 'http://localhost:8000/connection/file' \
-  --data-urlencode 'name=local-files' --data-urlencode 'action=list' \
-  --data-urlencode 'recursive=true'
-
-curl -X POST 'http://localhost:8000/connection/file?name=local-files&action=write&path=example.bin' \
-  -H 'Content-Type: application/octet-stream' --data-binary @example.bin
-
-curl --get 'http://localhost:8000/connection/file' \
-  --data-urlencode 'name=local-files' --data-urlencode 'action=read' \
-  --data-urlencode 'path=example.bin' --output downloaded.bin
-```
-
-## Transfer API
-
-`POST /transfer` copies a file between any two saved connections using the
-shared connector interface. The destination is created exclusively; an existing
-destination fails the transfer rather than being overwritten. Transfers use bounded
-64 KiB chunks rather than loading the whole file. SFTP writes are pipelined and
-SFTP reads prefetch up to 64 concurrent requests, so throughput is not limited
-by one network round trip per packet.
-
-```bash
-curl -X POST 'http://localhost:8000/transfer' \
-  -H 'Content-Type: application/json' \
-  -d '{"source":"local-files","source_file":"customers.csv","destination":"sftp-files","destination_file":"customers.csv"}'
-```
-
-The request returns `202 Accepted` immediately with the `in_progress` status
-record and a `Location` header; the copy runs in a background worker pool (up
-to 4 concurrent transfers, further requests queue). Poll
-`GET /transfer?transfer_id=<id>` until `state` is `completed` (with
-`completed_at` and the final `bytes_transferred`) or `failed` (with a safe
-`error`). While a transfer runs, `bytes_transferred` reports the bytes written
-to the destination so far, updated about once per second; a failed transfer
-keeps the last recorded count.
-Status is persisted, so it survives a service restart.
-
-On shutdown (Ctrl+C or `SIGTERM`), queued transfers that have not started are
-cancelled and marked `failed`, and the service waits for running transfers to
-finish, logging
-`Waiting for N running transfer(s) to finish before shutting down. Interrupt again to stop them.`
-A second interrupt stops running transfers at their next chunk: each is logged
-with its byte count and marked `failed` with the bytes copied so far. The
-destination may then contain a partial file that must be removed before
-retrying. Transfers still marked `in_progress` after an unclean exit are marked
-`failed` on the next start.
-
-Before accepting a transfer, the service checks that the source file can be
-opened, so no record is created when this fails: a missing source returns
-`404 Source file not found.`, a source permission denial returns `403`, and
-source connection or authentication failures return `502`, each prefixed with
-`Source:`. Unknown connection names return `404` and invalid requests return
-`422`. Failures during the copy (existing destination, destination permission
-or connectivity problems, or a source that fails mid-copy) are recorded on the
-transfer. The error names the failing side and
-path, for example
-`Permission denied writing destination 'remote:upload.bin'. ...`, and the
-failure is logged at WARNING with the transfer ID (SFTP permission denials also
-log the server's errno/reason).
-
-With the bundled Compose SFTP server, the chroot home is read-only; write to
-the mounted `data/` subdirectory (for example `data/upload.bin`).
-
-## Run with Docker Compose
-
-From the repository root, with `DATABRIDGE_SECRET_KEY` exported, generate
-persistent SSH host keys once before the first start:
-
-```bash
-mkdir -p .databridge/sftp-host-keys
-chmod 700 .databridge/sftp-host-keys
-ssh-keygen -t ed25519 -N '' -f .databridge/sftp-host-keys/ssh_host_ed25519_key
-ssh-keygen -t rsa -b 4096 -N '' -f .databridge/sftp-host-keys/ssh_host_rsa_key
-awk '{print "sftp " $1 " " $2}' .databridge/sftp-host-keys/ssh_host_ed25519_key.pub \
-  > .databridge/sftp-host-keys/known_hosts
-```
-
-Keep existing keys on subsequent starts; do not overwrite them. For an existing
-server, preserve its keys and verify its public key before trusting it. Compose
-mounts the server keys and the API's known_hosts file read-only. These files live
-under the gitignored `.databridge` directory; never commit the private keys.
-
-Start the services:
-
-```bash
-docker compose up --build
-```
-
-The API container listens on port `8000`. Compose supplies the absolute database
-path `/var/lib/databridge/db.sqlite` and bind-mounts its parent directory from
-`.databridge/local` so saved configurations survive container
-recreation. The key is passed at runtime, never baked into the image. Missing keys
-cause Compose to fail before starting containers.
-
-Within Compose, the API reaches the SFTP service at `sftp:22`; port `8822` is only
-the host-published port. Exposing port `8822` on the container does not change
-the SSH listener. If `sftp:22` times out despite a listening server, check Docker
-bridge forwarding and host firewall rules, including stale `iptables-legacy`
-rules on hosts that also use nftables.
+1. On server shutdown & start, instead of abandonning transfers, be able to pause the transfer and then continue from that block of bytes. This can save time and avoid having users to restart transfers after a deployment/maintenance of the webservice.
