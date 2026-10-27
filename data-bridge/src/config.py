@@ -1,9 +1,11 @@
+import base64
 import os
 import sqlite3
 import stat
 from contextlib import closing
 from dataclasses import dataclass, field
 from pathlib import Path
+
 from cryptography.fernet import Fernet
 
 from exceptions import ConfigurationError
@@ -24,9 +26,13 @@ def _required_env(name: str) -> str:
 
 def _validate_secret_key(key: str) -> str:
     try:
-        Fernet(key.encode())
+        Fernet(key)
+        # Fernet accepts non-canonical encodings; require the exact URL-safe form.
+        valid = base64.urlsafe_b64encode(base64.urlsafe_b64decode(key)).decode() == key
     except (ValueError, TypeError):
-        raise ConfigurationError("DATABRIDGE_SECRET_KEY must be a valid Fernet key.") from None
+        valid = False
+    if not valid:
+        raise ConfigurationError("DATABRIDGE_SECRET_KEY must be a valid Fernet key.")
     return key
 
 

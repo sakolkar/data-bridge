@@ -11,7 +11,7 @@ import paramiko
 from paramiko.ssh_exception import NoValidConnectionsError
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from connector import Connector, FileEntry, WriteMode
+from connector import CHUNK_SIZE, Connector, FileEntry, WriteMode
 from exceptions import (
     ConnectorFileExistsError,
     ConnectorFileNotFoundError,
@@ -215,14 +215,7 @@ class SFTPConnector(Connector):
 
             return sorted(entries("."), key=lambda entry: entry["path"])
 
-    def read(self, path: str) -> bytes:
-        resolved = self._resolve(path)
-        with self._client() as sftp:
-            with _sftp_errors(resolved), sftp.open(resolved, "rb") as stream:
-                stream.prefetch(max_concurrent_requests=_PREFETCH_REQUESTS)
-                return stream.read()
-
-    def iter_read(self, path: str, chunk_size: int = 64 * 1024) -> Iterator[bytes]:
+    def read_chunks(self, path: str, chunk_size: int = CHUNK_SIZE) -> Iterator[bytes]:
         resolved = self._resolve(path)
         if type(chunk_size) is not int or chunk_size <= 0:
             raise InvalidConnectorArgumentError("Chunk size must be a positive integer.")
@@ -251,29 +244,6 @@ class SFTPConnector(Connector):
                 stream.seek(size)
                 while chunk := stream.read(chunk_size):
                     yield chunk
-
-    def write(self, path: str, data: bytes, *, mode: WriteMode = "create") -> None:
-        resolved = self._resolve(path)
-        if not isinstance(data, bytes):
-            raise InvalidConnectorArgumentError("File data must be bytes.")
-        if mode not in ("create", "replace"):
-            raise InvalidConnectorArgumentError("Invalid file write mode.")
-        with self._client() as sftp:
-            with _sftp_errors(resolved):
-                if mode == "create":
-                    try:
-                        sftp.stat(resolved)
-                    except OSError as error:
-                        if error.errno != errno.ENOENT:
-                            raise
-                    else:
-                        raise ConnectorFileExistsError()
-                with sftp.open(resolved, "wx" if mode == "create" else "r+b") as stream:
-                    # Don't wait for a server acknowledgement after every packet.
-                    stream.set_pipelined(True)
-                    stream.write(data)
-                    if mode == "replace":
-                        stream.truncate(len(data))
 
     def write_chunks(
         self,

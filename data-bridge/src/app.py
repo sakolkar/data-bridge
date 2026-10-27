@@ -28,7 +28,7 @@ from exceptions import (
 from routes.connection import router as connection_router
 from routes.file import router as file_router
 from routes.transfer import router as transfer_router
-from transfer_manager import TransferManager
+from controllers.transfer_manager import TransferManager
 from controllers.transfer import TransferController
 
 logger = logging.getLogger(__name__)

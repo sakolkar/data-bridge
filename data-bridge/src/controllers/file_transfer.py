@@ -38,7 +38,7 @@ def transfer_file(
     on_progress: Callable[[int], None] | None = None,
     stop: threading.Event | None = None,
 ) -> int:
-    chunks = source.iter_read(source_path)
+    chunks = source.read_chunks(source_path)
 
     def tagged_source() -> Iterator[bytes]:
         transferred = 0

@@ -2,7 +2,7 @@ import asyncio
 import signal
 from types import FrameType
 
-from transfer_manager import TransferManager
+from controllers.transfer_manager import TransferManager
 
 
 def test_second_interrupt_stops_transfers_and_chains_to_server() -> None:

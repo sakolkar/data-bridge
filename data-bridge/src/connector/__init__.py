@@ -3,7 +3,7 @@ from collections.abc import Iterable, Iterator
 from typing import Literal, TypedDict
 
 WriteMode = Literal["create", "replace"]
-TRANSFER_CHUNK_SIZE = 64 * 1024
+CHUNK_SIZE = 64 * 1024
 
 
 class FileEntry(TypedDict):
@@ -15,10 +15,6 @@ class FileEntry(TypedDict):
 class Connector(ABC):
     """
     File operations using connector-relative paths, never host absolute paths.
-
-    Implementations raise InvalidConnectorArgumentError for invalid paths/limits,
-    ConnectorFileNotFoundError for missing files, and ConnectorOperationError for
-    other operational failures. No HTTP or transport-specific types are exposed.
     """
 
     @abstractmethod
@@ -31,26 +27,23 @@ class Connector(ABC):
         not its target.
         """
 
-    @abstractmethod
     def read(self, path: str) -> bytes:
         """
         Return the complete file contents without decoding or transforming.
         """
+        return b"".join(self.read_chunks(path))
 
     @abstractmethod
-    def iter_read(self, path: str, chunk_size: int = TRANSFER_CHUNK_SIZE) -> Iterator[bytes]:
+    def read_chunks(self, path: str, chunk_size: int = CHUNK_SIZE) -> Iterator[bytes]:
         """
         Yield file contents in bounded byte chunks without buffering the file.
         """
 
-    @abstractmethod
     def write(self, path: str, data: bytes, *, mode: WriteMode = "create") -> None:
         """
         Create a file, or replace an existing file in replace mode.
-
-        Create mode raises ConnectorFileExistsError if the entry exists.
-        Replace mode raises ConnectorFileNotFoundError if the file is missing.
         """
+        self.write_chunks(path, [data], mode=mode)
 
     @abstractmethod
     def write_chunks(
@@ -62,6 +55,9 @@ class Connector(ABC):
     ) -> int:
         """
         Write byte chunks to a file and return the number of bytes written.
+
+        Create mode raises ConnectorFileExistsError if the entry exists.
+        Replace mode raises ConnectorFileNotFoundError if the file is missing.
         """
 
     @abstractmethod
@@ -69,6 +65,5 @@ class Connector(ABC):
         """
         Return at most `lines` LF-delimited lines and `max_bytes` bytes.
 
-        Both limits must be positive. The byte cap may truncate a line. Read
-        only a bounded prefix, without loading the whole file or parsing content.
+        Both limits must be positive. The byte cap may truncate a line.
         """

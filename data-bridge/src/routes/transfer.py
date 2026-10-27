@@ -17,8 +17,8 @@ from exceptions import (
     ConnectorPermissionError,
     TransferStoreError,
 )
-from transfer import TransferCancelledError, TransferStepError, transfer_file
-from transfer_manager import TransferManager
+from controllers.file_transfer import TransferCancelledError, TransferStepError, transfer_file
+from controllers.transfer_manager import TransferManager
 from controllers.transfer import TransferController
 
 logger = logging.getLogger(__name__)
