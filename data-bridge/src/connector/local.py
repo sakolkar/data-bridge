@@ -1,4 +1,4 @@
-from collections.abc import Iterator
+from collections.abc import Iterable, Iterator
 from contextlib import contextmanager
 from pathlib import Path
 from stat import S_ISDIR, S_ISLNK, S_ISREG
@@ -9,6 +9,7 @@ from exceptions import (
     ConnectorFileExistsError,
     ConnectorFileNotFoundError,
     ConnectorOperationError,
+    ConnectorPermissionError,
     InvalidConnectorArgumentError,
 )
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -42,6 +43,11 @@ def _filesystem_errors() -> Iterator[None]:
         raise ConnectorFileNotFoundError("File not found.") from None
     except FileExistsError:
         raise ConnectorFileExistsError("File already exists.") from None
+    except PermissionError:
+        raise ConnectorPermissionError(
+            "Permission denied by the local filesystem. Check that the service "
+            "user can access the path."
+        ) from None
     except OSError:
         raise ConnectorOperationError("Local file operation failed.") from None
 
@@ -112,6 +118,16 @@ class LocalConnector(Connector):
         with _filesystem_errors():
             return self._resolve(path).read_bytes()
 
+    def iter_read(self, path: str, chunk_size: int = 64 * 1024) -> Iterator[bytes]:
+        if type(chunk_size) is not int or chunk_size <= 0:
+            raise InvalidConnectorArgumentError(
+                "Chunk size must be a positive integer."
+            )
+        with _filesystem_errors():
+            with self._resolve(path).open("rb") as stream:
+                while chunk := stream.read(chunk_size):
+                    yield chunk
+
     def write(self, path: str, data: bytes, *, mode: WriteMode = "create") -> None:
         # TODO: add streamed writing from Transfer-Encoding: chunked
 
@@ -126,6 +142,28 @@ class LocalConnector(Connector):
                 stream.write(data)
                 if mode == "replace":
                     stream.truncate()
+
+    def write_chunks(
+        self,
+        path: str,
+        chunks: Iterable[bytes],
+        *,
+        mode: WriteMode = "create",
+    ) -> int:
+        if mode not in ("create", "replace"):
+            raise InvalidConnectorArgumentError("Invalid file write mode.")
+        total = 0
+        with _filesystem_errors():
+            with self._resolve(path).open(
+                "xb" if mode == "create" else "r+b"
+            ) as stream:
+                for chunk in chunks:
+                    if not isinstance(chunk, bytes):
+                        raise InvalidConnectorArgumentError("File data must be bytes.")
+                    total += stream.write(chunk)
+                if mode == "replace":
+                    stream.truncate()
+        return total
 
     def head(self, path: str, lines: int = 10, max_bytes: int = 65536) -> bytes:
         # TODO: determine file type and pass along to appropriate implementation of file handler

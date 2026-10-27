@@ -1,7 +1,9 @@
 from abc import ABC, abstractmethod
+from collections.abc import Iterable, Iterator
 from typing import Literal, TypedDict
 
 WriteMode = Literal["create", "replace"]
+TRANSFER_CHUNK_SIZE = 64 * 1024
 
 
 class FileEntry(TypedDict):
@@ -36,12 +38,32 @@ class Connector(ABC):
         """
 
     @abstractmethod
+    def iter_read(
+        self, path: str, chunk_size: int = TRANSFER_CHUNK_SIZE
+    ) -> Iterator[bytes]:
+        """
+        Yield file contents in bounded byte chunks without buffering the file.
+        """
+
+    @abstractmethod
     def write(self, path: str, data: bytes, *, mode: WriteMode = "create") -> None:
         """
         Create a file, or replace an existing file in replace mode.
 
         Create mode raises ConnectorFileExistsError if the entry exists.
         Replace mode raises ConnectorFileNotFoundError if the file is missing.
+        """
+
+    @abstractmethod
+    def write_chunks(
+        self,
+        path: str,
+        chunks: Iterable[bytes],
+        *,
+        mode: WriteMode = "create",
+    ) -> int:
+        """
+        Write byte chunks to a file and return the number of bytes written.
         """
 
     @abstractmethod

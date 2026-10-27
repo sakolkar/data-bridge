@@ -26,6 +26,8 @@ while true; do
     printf '4) Replace connection\n5) Delete connection\n'
     printf '\nFiles\n'
     printf '6) List files\n7) Read file\n8) Head file\n9) Create file\n10) Replace file\n'
+    printf '\nTransfers\n'
+    printf '11) Create transfer\n12) Get transfer status\n'
     printf '\n0) Quit\n'
     IFS= read -r -p 'Choose: ' choice || break
 
@@ -84,6 +86,20 @@ while true; do
             ;;
         10)
             write_file PUT || break
+            ;;
+        11)
+            IFS= read -r -p 'Source connection: ' source || break
+            IFS= read -r -p 'Source file path: ' source_file || break
+            IFS= read -r -p 'Destination connection: ' destination || break
+            IFS= read -r -p 'Destination file path: ' destination_file || break
+            body=$(python -c 'import json,sys; print(json.dumps(dict(zip(("source","source_file","destination","destination_file"), sys.argv[1:]))))' \
+                "$source" "$source_file" "$destination" "$destination_file")
+            curl -i -X POST -H 'Content-Type: application/json' \
+                -d "$body" "$base_url/transfer"
+            ;;
+        12)
+            IFS= read -r -p 'Transfer ID: ' transfer_id || break
+            curl -i --url-query "transfer_id=$transfer_id" "$base_url/transfer"
             ;;
         0)
             break

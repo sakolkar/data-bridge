@@ -1,30 +1,20 @@
-import json
+from pathlib import PurePosixPath
 from typing import Annotated, Literal
+from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import JSONResponse
-from pydantic import ValidationError
 
 from connector import Connector
-from connector.registry import create_connector
-from exceptions import ConnectorOperationError
+from connector.resolution import resolve_connector
 from routes.connection import Name, Store
 
 router = APIRouter(prefix="/connection/file")
 
 
 def get_connector(name: Name, store: Store) -> Connector:
-    record = store.get(name)
-    try:
-        settings = json.loads(record.settings)
-        if not isinstance(settings, dict):
-            raise ConnectorOperationError("Stored connection configuration is invalid.")
-        return create_connector(record.type, settings)
-    except (json.JSONDecodeError, ValidationError):
-        raise ConnectorOperationError(
-            "Stored connection configuration is invalid."
-        ) from None
+    return resolve_connector(store, name)
 
 
 FileConnector = Annotated[Connector, Depends(get_connector)]
@@ -49,7 +39,19 @@ def get_file(
         data = connector.read(path)
     else:
         data = connector.head(path, lines=lines, max_bytes=max_bytes)
-    return Response(content=data, media_type="application/octet-stream")
+    return Response(
+        content=data,
+        media_type="application/octet-stream",
+        headers=_file_headers(path),
+    )
+
+
+def _file_headers(path: str) -> dict[str, str]:
+    name = PurePosixPath(path.replace("\\", "/")).name or path
+    return {
+        "Content-Disposition": f"inline; filename*=UTF-8''{quote(name)}",
+        "X-File-Path": quote(path, safe="/"),
+    }
 
 
 # TODO: support Transfer-Encoding: chunked

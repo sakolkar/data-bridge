@@ -1,15 +1,19 @@
 import errno
+from collections.abc import Iterator
 from io import BytesIO
 from stat import S_IFDIR, S_IFREG
 from typing import Any
 
 import paramiko
 import pytest
+from paramiko.ssh_exception import NoValidConnectionsError
 
 from connector.sftp import SFTPConnector
 from exceptions import (
     ConnectorFileExistsError,
     ConnectorFileNotFoundError,
+    ConnectorOperationError,
+    ConnectorPermissionError,
     InvalidConnectorArgumentError,
 )
 
@@ -18,6 +22,7 @@ class FakeSFTP:
     def __init__(self) -> None:
         self.files: dict[str, bytes] = {"file": b"first\nsecond\n"}
         self.open_modes: list[tuple[str, str]] = []
+        self.denied: set[str] = set()
         self.closed = False
 
     def listdir_attr(self, path: str) -> list[paramiko.SFTPAttributes]:
@@ -47,21 +52,60 @@ class FakeSFTP:
 
     def open(self, path: str, mode: str) -> BytesIO:
         self.open_modes.append((path, mode))
-        if mode == "x" and path in self.files:
+        if path in self.denied:
+            raise PermissionError(errno.EACCES, "Permission denied")
+        if "x" in mode and path in self.files:
             raise FileExistsError(errno.EEXIST, "File exists", path)
-        if path not in self.files and mode != "x":
+        creating = "w" in mode or "x" in mode
+        if path not in self.files and not creating:
             raise FileNotFoundError(errno.ENOENT, "No such file", path)
-        return FakeRemoteFile(self, path, self.files.get(path, b""))
+        contents = b"" if "w" in mode else self.files.get(path, b"")
+        # Like paramiko, only "w", "a", or "+" grant write access.
+        return FakeRemoteFile(self, path, contents, any(f in mode for f in "wa+"))
 
     def close(self) -> None:
         self.closed = True
 
 
 class FakeRemoteFile(BytesIO):
-    def __init__(self, sftp: FakeSFTP, path: str, contents: bytes) -> None:
+    def __init__(
+        self, sftp: FakeSFTP, path: str, contents: bytes, writable: bool
+    ) -> None:
         super().__init__(contents)
         self.sftp = sftp
         self.path = path
+        self.writable_mode = writable
+        self.pipelined = False
+        self.prefetched = False
+
+    def set_pipelined(self, pipelined: bool = True) -> None:
+        self.pipelined = pipelined
+        self.sftp.pipelined = pipelined
+
+    def prefetch(self, max_concurrent_requests: int | None = None) -> None:
+        self.prefetched = True
+        self.sftp.prefetched = True
+
+    def stat(self) -> paramiko.SFTPAttributes:
+        attributes = paramiko.SFTPAttributes()
+        attributes.st_size = len(self.getvalue())
+        return attributes
+
+    def readv(
+        self,
+        chunks: list[tuple[int, int]],
+        max_concurrent_prefetch_requests: int | None = None,
+    ) -> Iterator[bytes]:
+        self.prefetched = True
+        self.sftp.prefetched = True
+        for offset, length in chunks:
+            self.seek(offset)
+            yield self.read(length)
+
+    def write(self, data: bytes) -> int:  # type: ignore[override]
+        if not self.writable_mode:
+            raise OSError("File not open for writing")
+        return super().write(data)
 
     def close(self) -> None:
         if not self.closed:
@@ -75,6 +119,7 @@ class FakeSSH:
         self.connection: dict[str, Any] = {}
         self.policy: paramiko.MissingHostKeyPolicy | None = None
         self.closed = False
+        self.connection_error: Exception | None = None
 
     def load_system_host_keys(self) -> None:
         pass
@@ -86,6 +131,8 @@ class FakeSSH:
 
     def connect(self, **kwargs: Any) -> None:
         self.connection = kwargs
+        if self.connection_error is not None:
+            raise self.connection_error
 
     def open_sftp(self) -> FakeSFTP:
         return self.sftp
@@ -160,3 +207,46 @@ def test_sftp_create_does_not_overwrite_existing_file(
     with pytest.raises(ConnectorFileExistsError):
         connector.write("file", b"overwrite")
     assert connector.read("file") == b"first\nsecond\n"
+
+
+def test_sftp_permission_denial_names_the_path(
+    sftp: tuple[SFTPConnector, FakeSFTP, FakeSSH],
+) -> None:
+    connector, remote, _ = sftp
+    remote.denied.add("upload.bin")
+    with pytest.raises(ConnectorPermissionError, match="access to 'upload.bin'"):
+        connector.write("upload.bin", b"data")
+
+
+@pytest.mark.parametrize(
+    ("failure", "message"),
+    [
+        (
+            paramiko.AuthenticationException("secret detail"),
+            "SFTP authentication failed. Check the configured username and password.",
+        ),
+        (
+            NoValidConnectionsError(
+                {("localhost", 8822): OSError(errno.ECONNREFUSED, "refused")}
+            ),
+            "Could not connect to the SFTP server. Check the host, port, and "
+            "whether the server is running and reachable.",
+        ),
+        (
+            TimeoutError("private timeout detail"),
+            "The SFTP connection timed out. Check server availability and network reachability.",
+        ),
+    ],
+)
+def test_sftp_connection_errors_are_actionable_and_safe(
+    sftp: tuple[SFTPConnector, FakeSFTP, FakeSSH],
+    failure: Exception,
+    message: str,
+) -> None:
+    connector, _, ssh = sftp
+    ssh.connection_error = failure
+
+    with pytest.raises(ConnectorOperationError, match=message) as error:
+        connector.list()
+
+    assert str(failure) not in str(error.value)

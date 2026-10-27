@@ -186,7 +186,11 @@ def test_unimplemented_connection_types_are_rejected(
         method, "/connection", params={"name": "source"}, json=body
     )
     assert response.status_code == 422
-    assert any(item["loc"] == ["body", "type"] for item in response.json()["detail"])
+    assert {
+        "loc": ["body", "type"],
+        "msg": "Input should be 'local' or 'sftp'",
+        "type": "literal_error",
+    } in response.json()["detail"]
     assert "private-value" not in response.text
     assert client.get("/connection").json() == [
         {"name": "source", "type": "local", "settings": {"path": "/original"}}
@@ -272,7 +276,7 @@ def test_local_configuration_persists_encrypted(
         }
 
 
-def test_sftp_configuration_is_encrypted_and_listed(
+def test_sftp_configuration_is_encrypted_and_listed_without_password(
     client: TestClient, sqlite_path: Path
 ) -> None:
     password = "manual-test-password"
@@ -298,10 +302,10 @@ def test_sftp_configuration_is_encrypted_and_listed(
                 "host": "localhost",
                 "port": 8822,
                 "username": "testuser",
-                "password": password,
             },
         }
     ]
+    assert password not in client.get("/connection").text
     assert client.get("/connection", params={"name": "sftp-files"}).json() == {
         "name": "sftp-files",
         "type": "sftp",

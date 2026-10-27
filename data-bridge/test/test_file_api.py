@@ -7,7 +7,7 @@ from fastapi.testclient import TestClient
 from app import app
 from connector.local import LocalConnector
 from db.models import ConnectionRecord
-from exceptions import ConnectorOperationError
+from exceptions import ConnectorOperationError, ConnectorUnavailableError
 
 
 @pytest.fixture
@@ -117,6 +117,21 @@ def test_head_returns_bounded_raw_bytes(
     )
     assert response.status_code == 200
     assert response.content == expected
+
+
+def test_read_and_head_identify_the_file(client: TestClient, home: Path) -> None:
+    (home / "dir").mkdir()
+    (home / "dir" / "données.txt").write_bytes(b"data\n")
+    for action in ("read", "head"):
+        response = client.get(
+            "/connection/file",
+            params={"name": "local-files", "action": action, "path": "dir/données.txt"},
+        )
+        assert response.status_code == 200
+        assert response.headers["content-disposition"] == (
+            "inline; filename*=UTF-8''donn%C3%A9es.txt"
+        )
+        assert response.headers["x-file-path"] == "dir/donn%C3%A9es.txt"
 
 
 @pytest.mark.parametrize(
@@ -239,3 +254,17 @@ def test_file_operation_errors_are_not_exposed(
     assert response.json() == {"detail": "File operation failed."}
     assert "Connector operation failed." in caplog.text
     assert "private-value" not in caplog.text
+
+
+def test_unavailable_backend_returns_descriptive_bad_gateway(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def unavailable(connector: LocalConnector, recursive: bool = False) -> list[str]:
+        raise ConnectorUnavailableError("Could not connect to the SFTP server.")
+
+    monkeypatch.setattr(LocalConnector, "list", unavailable)
+    response = client.get(
+        "/connection/file", params={"name": "local-files", "action": "list"}
+    )
+    assert response.status_code == 502
+    assert response.json() == {"detail": "Could not connect to the SFTP server."}

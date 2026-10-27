@@ -8,6 +8,7 @@ from exceptions import (
     ConnectorFileExistsError,
     ConnectorFileNotFoundError,
     ConnectorOperationError,
+    ConnectorPermissionError,
     InvalidConnectorArgumentError,
 )
 
@@ -183,5 +184,6 @@ def test_listing_errors_are_translated(
         raise PermissionError("private host path")
 
     monkeypatch.setattr(Path, "iterdir", denied)
-    with pytest.raises(ConnectorOperationError, match="Local file operation failed."):
+    with pytest.raises(ConnectorPermissionError, match="Permission denied") as error:
         connector.list(recursive=True)
+    assert "private host path" not in str(error.value)

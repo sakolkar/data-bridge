@@ -4,6 +4,7 @@ from config import load_settings
 
 settings = load_settings()
 
+
 class EncryptedString(TypeDecorator):
     """
     Transparently encrypts a String column on write and decrypts on read.

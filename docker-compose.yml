@@ -3,9 +3,11 @@ services:
     image: atmoz/sftp:alpine-3.7
     ports:
       - "8822:22"
-    command: testuser:testpass:1001
+    command: testuser:testpass:1000
     volumes:
       - ./.databridge/sftp:/home/testuser/data
+      #- ./.databridge/sftp-host-keys/ssh_host_ed25519_key:/etc/ssh/ssh_host_ed25519_key:ro
+      #- ./.databridge/sftp-host-keys/ssh_host_rsa_key:/etc/ssh/ssh_host_rsa_key:ro
     restart: unless-stopped
   databridge:
     build: ./data-bridge
@@ -15,5 +17,6 @@ services:
       DATABRIDGE_SQLITE_PATH: /var/lib/databridge/db.sqlite
     volumes:
       - ./.databridge/local:/var/lib/databridge
+      #- ./.databridge/sftp-host-keys/known_hosts:/root/.ssh/known_hosts:ro
     ports:
       - 8000:8000

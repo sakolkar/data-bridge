@@ -6,7 +6,7 @@ from fastapi.exceptions import RequestValidationError
 from pydantic import ValidationError
 
 from connection_store import ConnectionStore
-from connector.registry import validate_configuration
+from connector.registry import public_settings, validate_configuration
 from db.models import ConnectionName, ConnectionRecord
 
 router = APIRouter(prefix="/connection")
@@ -59,7 +59,12 @@ def get_connection(
 ) -> dict[str, str] | list[dict[str, object]]:
     if name is None:
         return [
-            {**record, "settings": json.loads(record["settings"])}
+            {
+                **record,
+                "settings": public_settings(
+                    record["type"], json.loads(record["settings"])
+                ),
+            }
             for record in store.list()
         ]
     return store.get_metadata(name)

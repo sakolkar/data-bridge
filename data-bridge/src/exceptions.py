@@ -28,6 +28,18 @@ class ConnectionNotFoundError(ConnectionStoreError):
     """
 
 
+class TransferStoreError(DatabridgeException):
+    """
+    A transfer persistence operation failed.
+    """
+
+
+class TransferNotFoundError(TransferStoreError):
+    """
+    No transfer exists with the given identifier.
+    """
+
+
 class ConnectorError(DatabridgeException):
     """
     A connector operation failed; messages must be safe for callers.
@@ -55,4 +67,16 @@ class InvalidConnectorArgumentError(ConnectorError):
 class ConnectorOperationError(ConnectorError):
     """
     A storage, permission, authentication, or connectivity failure.
+    """
+
+
+class ConnectorPermissionError(ConnectorOperationError):
+    """
+    The storage backend denied access to the requested path.
+    """
+
+
+class ConnectorUnavailableError(ConnectorOperationError):
+    """
+    The backend could not be reached or rejected the configured credentials.
     """

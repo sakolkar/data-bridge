@@ -1,11 +1,14 @@
 import errno
-from collections.abc import Iterator
+import logging
+import socket
+from collections.abc import Iterable, Iterator
 from contextlib import contextmanager
 from pathlib import PurePosixPath
 from stat import S_ISDIR, S_ISLNK, S_ISREG
 from typing import Annotated, Literal
 
 import paramiko
+from paramiko.ssh_exception import NoValidConnectionsError
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from connector import Connector, FileEntry, WriteMode
@@ -13,8 +16,15 @@ from exceptions import (
     ConnectorFileExistsError,
     ConnectorFileNotFoundError,
     ConnectorOperationError,
+    ConnectorPermissionError,
+    ConnectorUnavailableError,
     InvalidConnectorArgumentError,
 )
+
+logger = logging.getLogger(__name__)
+
+_PREFETCH_REQUESTS = 64
+_READ_AHEAD_CHUNKS = 32
 
 
 class SFTPConnectionSettings(BaseModel):
@@ -23,7 +33,7 @@ class SFTPConnectionSettings(BaseModel):
     host: str
     port: Annotated[int, Field(ge=1, le=65535)]
     username: str
-    password: str = Field(repr=False)
+    password: str = Field(repr=False, json_schema_extra={"writeOnly": True})
 
     @field_validator("host", "username")
     @classmethod
@@ -46,17 +56,84 @@ class SFTPConnectionConfiguration(SFTPConnectionSettings):
 
 
 @contextmanager
-def _sftp_errors() -> Iterator[None]:
+def _sftp_errors(path: str | None = None) -> Iterator[None]:
     try:
         yield
+    except paramiko.AuthenticationException:
+        raise ConnectorUnavailableError(
+            "SFTP authentication failed. Check the configured username and password."
+        ) from None
+    except paramiko.BadHostKeyException:
+        raise ConnectorUnavailableError(
+            "SFTP host key verification failed. Verify the server host key and "
+            "the service user's known_hosts file."
+        ) from None
+    except NoValidConnectionsError:
+        raise ConnectorUnavailableError(
+            "Could not connect to the SFTP server. Check the host, port, and "
+            "whether the server is running and reachable."
+        ) from None
+    except socket.gaierror:
+        raise ConnectorUnavailableError(
+            "Could not resolve the SFTP host. Check the hostname and DNS/network configuration."
+        ) from None
+    except (socket.timeout, TimeoutError):
+        raise ConnectorUnavailableError(
+            "The SFTP connection timed out. Check server availability and network reachability."
+        ) from None
     except OSError as error:
         if error.errno == errno.ENOENT:
             raise ConnectorFileNotFoundError("File not found.") from None
         if error.errno == errno.EEXIST:
             raise ConnectorFileExistsError("File already exists.") from None
-        raise ConnectorOperationError("SFTP operation failed.") from None
-    except (paramiko.SSHException, paramiko.SFTPError, EOFError):
-        raise ConnectorOperationError("SFTP operation failed.") from None
+        if error.errno in (errno.EACCES, errno.EPERM):
+            logger.warning(
+                "SFTP server denied access to %r (errno=%s: %s).",
+                path,
+                error.errno,
+                error.strerror,
+            )
+            target = f" to '{path}'" if path else ""
+            raise ConnectorPermissionError(
+                f"The SFTP server denied access{target}. The account lacks "
+                "permission for this path; on chrooted servers the home "
+                "directory itself is often read-only, so use a writable "
+                "subdirectory or fix the remote permissions."
+            ) from None
+        if error.errno in (
+            errno.ECONNREFUSED,
+            errno.ETIMEDOUT,
+            errno.EHOSTUNREACH,
+            errno.ENETUNREACH,
+        ):
+            raise ConnectorUnavailableError(
+                "Could not reach the SFTP server. Check the host, port, and "
+                "whether the server is running."
+            ) from None
+        logger.warning(
+            "SFTP file operation on %r failed (errno=%s): %s",
+            path,
+            error.errno,
+            error.strerror or error,
+        )
+        raise ConnectorOperationError(
+            "SFTP file operation failed. Check the remote path and permissions."
+        ) from None
+    except paramiko.SSHException:
+        raise ConnectorUnavailableError(
+            "The SSH handshake failed. Verify that the server supports SSH/SFTP "
+            "and that its host key is trusted."
+        ) from None
+    except EOFError:
+        raise ConnectorUnavailableError(
+            "The SFTP server closed the connection unexpectedly. Check server "
+            "availability."
+        ) from None
+    except paramiko.SFTPError:
+        raise ConnectorOperationError(
+            "The SFTP server rejected the operation. Check the remote path and "
+            "permissions."
+        ) from None
 
 
 class SFTPConnector(Connector):
@@ -150,8 +227,44 @@ class SFTPConnector(Connector):
     def read(self, path: str) -> bytes:
         resolved = self._resolve(path)
         with self._client() as sftp:
-            with _sftp_errors(), sftp.open(resolved, "rb") as stream:
+            with _sftp_errors(resolved), sftp.open(resolved, "rb") as stream:
+                stream.prefetch(max_concurrent_requests=_PREFETCH_REQUESTS)
                 return stream.read()
+
+    def iter_read(self, path: str, chunk_size: int = 64 * 1024) -> Iterator[bytes]:
+        resolved = self._resolve(path)
+        if type(chunk_size) is not int or chunk_size <= 0:
+            raise InvalidConnectorArgumentError(
+                "Chunk size must be a positive integer."
+            )
+        with self._client() as sftp:
+            with _sftp_errors(resolved), sftp.open(resolved, "rb") as stream:
+                size = stream.stat().st_size
+                if size is None:
+                    while chunk := stream.read(chunk_size):
+                        yield chunk
+                    return
+                # Read ahead in bounded windows of concurrent requests. Each
+                # window is fully received before it is yielded, so paramiko's
+                # prefetch thread is idle if the caller stops early and the
+                # connection is closed.
+                window = chunk_size * _READ_AHEAD_CHUNKS
+                for start in range(0, size, window):
+                    end = min(start + window, size)
+                    blocks = list(
+                        stream.readv(
+                            [
+                                (offset, min(chunk_size, end - offset))
+                                for offset in range(start, end, chunk_size)
+                            ],
+                            max_concurrent_prefetch_requests=_PREFETCH_REQUESTS,
+                        )
+                    )
+                    yield from blocks
+                # Files that grew after stat() are read to their current end.
+                stream.seek(size)
+                while chunk := stream.read(chunk_size):
+                    yield chunk
 
     def write(self, path: str, data: bytes, *, mode: WriteMode = "create") -> None:
         resolved = self._resolve(path)
@@ -160,7 +273,7 @@ class SFTPConnector(Connector):
         if mode not in ("create", "replace"):
             raise InvalidConnectorArgumentError("Invalid file write mode.")
         with self._client() as sftp:
-            with _sftp_errors():
+            with _sftp_errors(resolved):
                 if mode == "create":
                     try:
                         sftp.stat(resolved)
@@ -169,10 +282,47 @@ class SFTPConnector(Connector):
                             raise
                     else:
                         raise ConnectorFileExistsError("File already exists.")
-                with sftp.open(resolved, "x" if mode == "create" else "r+b") as stream:
+                with sftp.open(resolved, "wx" if mode == "create" else "r+b") as stream:
+                    # Don't wait for a server acknowledgement after every packet.
+                    stream.set_pipelined(True)
                     stream.write(data)
                     if mode == "replace":
                         stream.truncate(len(data))
+
+    def write_chunks(
+        self,
+        path: str,
+        chunks: Iterable[bytes],
+        *,
+        mode: WriteMode = "create",
+    ) -> int:
+        resolved = self._resolve(path)
+        if mode not in ("create", "replace"):
+            raise InvalidConnectorArgumentError("Invalid file write mode.")
+        total = 0
+        with self._client() as sftp:
+            with _sftp_errors(resolved):
+                if mode == "create":
+                    try:
+                        sftp.stat(resolved)
+                    except OSError as error:
+                        if error.errno != errno.ENOENT:
+                            raise
+                    else:
+                        raise ConnectorFileExistsError("File already exists.")
+                with sftp.open(resolved, "wx" if mode == "create" else "r+b") as stream:
+                    # Don't wait for a server acknowledgement after every packet.
+                    stream.set_pipelined(True)
+                    for chunk in chunks:
+                        if not isinstance(chunk, bytes):
+                            raise InvalidConnectorArgumentError(
+                                "File data must be bytes."
+                            )
+                        stream.write(chunk)
+                        total += len(chunk)
+                    if mode == "replace":
+                        stream.truncate(total)
+        return total
 
     def head(self, path: str, lines: int = 10, max_bytes: int = 65536) -> bytes:
         resolved = self._resolve(path)
@@ -181,7 +331,7 @@ class SFTPConnector(Connector):
                 "Head limits must be positive integers."
             )
         with self._client() as sftp:
-            with _sftp_errors(), sftp.open(resolved, "rb") as stream:
+            with _sftp_errors(resolved), sftp.open(resolved, "rb") as stream:
                 chunks = []
                 remaining = max_bytes
                 for _ in range(lines):
