@@ -44,9 +44,14 @@ def get_record(name: Name, body: dict[str, object]) -> ConnectionRecord:
 Record = Annotated[ConnectionRecord, Depends(get_record)]
 
 
+def _summary(record: ConnectionRecord) -> dict[str, str]:
+    return {"name": record.name, "type": record.type}
+
+
 @router.post("", status_code=201)
 def create_connection(record: Annotated[ConnectionRecord, Depends(get_create_record)], store: Store) -> dict[str, str]:
-    return store.create(record)
+    store.create(record)
+    return _summary(record)
 
 
 @router.get("")
@@ -55,18 +60,16 @@ def get_connection(
 ) -> dict[str, str] | list[dict[str, object]]:
     if name is None:
         return [
-            {
-                **record,
-                "settings": public_settings(record["type"], json.loads(record["settings"])),
-            }
+            {**_summary(record), "settings": public_settings(record.type, json.loads(record.settings))}
             for record in store.list()
         ]
-    return store.get_metadata(name)
+    return {"name": name, "type": store.get_type(name)}
 
 
 @router.put("")
 def replace_connection(record: Record, store: Store) -> dict[str, str]:
-    return store.replace(record)
+    store.replace(record)
+    return _summary(record)
 
 
 @router.delete("", status_code=204)

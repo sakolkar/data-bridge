@@ -126,7 +126,7 @@ def test_duplicate_names_do_not_replace_existing_configuration(
     store.create(
         ConnectionRecord(name="Source", type=original.type, settings=original.settings)
     )
-    assert [item["name"] for item in store.list()] == ["Source", "source"]
+    assert [item.name for item in store.list()] == ["Source", "source"]
 
 
 def test_replacement_and_deletion_are_persistent(
@@ -150,7 +150,7 @@ def test_missing_connections_are_distinguishable(store: ConnectionStore) -> None
     with pytest.raises(ConnectionNotFoundError):
         store.get("missing")
     with pytest.raises(ConnectionNotFoundError):
-        store.get_metadata("missing")
+        store.get_type("missing")
     with pytest.raises(ConnectionNotFoundError):
         store.replace(ConnectionRecord(name="missing", type="custom", settings=""))
     with pytest.raises(ConnectionNotFoundError):
@@ -185,7 +185,7 @@ def test_decryption_failure_raises_store_error(
         restarted = ConnectionStore(restarted_database.session)
         with pytest.raises(ConnectionStoreError, match="decrypt"):
             restarted.get("source")
-        assert restarted.get_metadata("source")["name"] == "source"
+        assert restarted.get_type("source") == "custom"
 
 
 def test_storage_failure_is_not_an_empty_list(
@@ -275,9 +275,9 @@ def test_existing_encrypted_text_database_is_compatible(
             store.initialize()
             assert store.get("source").settings == "password=private-value"
             listed = store.list()[0]
-            assert listed["name"] == "source"
-            assert listed["type"] == "custom"
-            assert listed["settings"] == store.get("source").settings
+            assert listed.name == "source"
+            assert listed.type == "custom"
+            assert listed.settings == store.get("source").settings
             store.replace(
                 ConnectionRecord(name="source", type="updated", settings="port=22")
             )

@@ -1,4 +1,4 @@
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterator, Sequence
 from contextlib import AbstractContextManager, contextmanager
 
 from sqlalchemy import delete, update
@@ -33,7 +33,7 @@ class ConnectionStore:
         with self._session() as session:
             session.exec(select(ConnectionRecord).limit(0))
 
-    def create(self, record: ConnectionRecord) -> dict[str, str]:
+    def create(self, record: ConnectionRecord) -> None:
         with self._session() as session:
             result = session.connection().execute(
                 insert(ConnectionRecord)
@@ -42,21 +42,17 @@ class ConnectionStore:
             )
             if result.rowcount == 0:
                 raise DuplicateConnectionError("Connection already exists.")
-        return {"name": record.name, "type": record.type}
 
-    def list(self) -> list[dict[str, str]]:
+    def list(self) -> Sequence[ConnectionRecord]:
         with self._session() as session:
-            rows = session.exec(select(ConnectionRecord).order_by(ConnectionRecord.name)).all()
-        return [{"name": row.name, "type": row.type, "settings": row.settings} for row in rows]
+            return session.exec(select(ConnectionRecord).order_by(ConnectionRecord.name)).all()
 
-    def get_metadata(self, name: str) -> dict[str, str]:
+    def get_type(self, name: str) -> str:
         with self._session() as session:
-            row = session.exec(
-                select(ConnectionRecord.name, ConnectionRecord.type).where(ConnectionRecord.name == name)
-            ).one_or_none()
-        if row is None:
+            type_ = session.exec(select(ConnectionRecord.type).where(ConnectionRecord.name == name)).one_or_none()
+        if type_ is None:
             raise ConnectionNotFoundError("Connection not found.")
-        return {"name": row.name, "type": row.type}
+        return type_
 
     def get(self, name: str) -> ConnectionRecord:
         with self._session() as session:
@@ -65,7 +61,7 @@ class ConnectionStore:
             raise ConnectionNotFoundError("Connection not found.")
         return record
 
-    def replace(self, record: ConnectionRecord) -> dict[str, str]:
+    def replace(self, record: ConnectionRecord) -> None:
         with self._session() as session:
             result = session.connection().execute(
                 update(ConnectionRecord)
@@ -74,7 +70,6 @@ class ConnectionStore:
             )
             if result.rowcount == 0:
                 raise ConnectionNotFoundError("Connection not found.")
-        return {"name": record.name, "type": record.type}
 
     def delete(self, name: str) -> None:
         with self._session() as session:
