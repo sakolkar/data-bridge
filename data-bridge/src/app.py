@@ -120,7 +120,7 @@ async def connection_error_handler(request: Request, error: ConnectionStoreError
     if isinstance(error, ConnectionNotFoundError):
         return JSONResponse(status_code=404, content={"detail": str(error)})
     logger.error("Connection storage operation failed.")
-    return JSONResponse(status_code=500, content={"detail": "Connection storage is unavailable."})
+    return JSONResponse(status_code=500, content={"detail": ConnectionStoreError.default_message})
 
 
 @app.exception_handler(TransferStoreError)
@@ -128,7 +128,7 @@ async def transfer_store_error_handler(request: Request, error: TransferStoreErr
     if isinstance(error, TransferNotFoundError):
         return JSONResponse(status_code=404, content={"detail": str(error)})
     logger.error("Transfer storage operation failed.")
-    return JSONResponse(status_code=500, content={"detail": "Transfer storage is unavailable."})
+    return JSONResponse(status_code=500, content={"detail": TransferStoreError.default_message})
 
 
 @app.exception_handler(ConnectorError)
@@ -150,4 +150,4 @@ async def connector_error_handler(request: Request, error: ConnectorError) -> JS
         request.url.path,
         type(error).__name__,
     )
-    return JSONResponse(status_code=500, content={"detail": "File operation failed."})
+    return JSONResponse(status_code=500, content={"detail": ConnectorError.default_message})

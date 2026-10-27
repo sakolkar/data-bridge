@@ -82,9 +82,9 @@ def _sftp_errors(path: str | None = None) -> Iterator[None]:
         ) from None
     except OSError as error:
         if error.errno == errno.ENOENT:
-            raise ConnectorFileNotFoundError("File not found.") from None
+            raise ConnectorFileNotFoundError() from None
         if error.errno == errno.EEXIST:
-            raise ConnectorFileExistsError("File already exists.") from None
+            raise ConnectorFileExistsError() from None
         if error.errno in (errno.EACCES, errno.EPERM):
             logger.warning(
                 "SFTP server denied access to %r (errno=%s: %s).",
@@ -267,7 +267,7 @@ class SFTPConnector(Connector):
                         if error.errno != errno.ENOENT:
                             raise
                     else:
-                        raise ConnectorFileExistsError("File already exists.")
+                        raise ConnectorFileExistsError()
                 with sftp.open(resolved, "wx" if mode == "create" else "r+b") as stream:
                     # Don't wait for a server acknowledgement after every packet.
                     stream.set_pipelined(True)
@@ -295,7 +295,7 @@ class SFTPConnector(Connector):
                         if error.errno != errno.ENOENT:
                             raise
                     else:
-                        raise ConnectorFileExistsError("File already exists.")
+                        raise ConnectorFileExistsError()
                 with sftp.open(resolved, "wx" if mode == "create" else "r+b") as stream:
                     # Don't wait for a server acknowledgement after every packet.
                     stream.set_pipelined(True)

@@ -23,7 +23,7 @@ class TransferStore:
             with self._session_factory() as session:
                 yield session
         except SQLAlchemyError:
-            raise TransferStoreError("Transfer storage is unavailable.") from None
+            raise TransferStoreError() from None
 
     def initialize(self) -> None:
         with self._session() as session:
@@ -108,7 +108,7 @@ class TransferStore:
         with self._session() as session:
             record = session.get(TransferRecord, transfer_id)
             if record is None:
-                raise TransferNotFoundError("Transfer not found.")
+                raise TransferNotFoundError()
             record.state = state
             record.completed_at = datetime.now(timezone.utc)
             if bytes_transferred is not None:
@@ -121,5 +121,5 @@ class TransferStore:
         with self._session() as session:
             record = session.exec(select(TransferRecord).where(TransferRecord.id == transfer_id)).one_or_none()
         if record is None:
-            raise TransferNotFoundError("Transfer not found.")
+            raise TransferNotFoundError()
         return record

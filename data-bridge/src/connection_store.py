@@ -27,7 +27,7 @@ class ConnectionStore:
             with self._session_factory() as session:
                 yield session
         except SQLAlchemyError:
-            raise ConnectionStoreError("Connection storage is unavailable.") from None
+            raise ConnectionStoreError() from None
 
     def initialize(self) -> None:
         with self._session() as session:
@@ -41,7 +41,7 @@ class ConnectionStore:
                 .on_conflict_do_nothing(index_elements=[ConnectionRecord.name])
             )
             if result.rowcount == 0:
-                raise DuplicateConnectionError("Connection already exists.")
+                raise DuplicateConnectionError()
 
     def list(self) -> Sequence[ConnectionRecord]:
         with self._session() as session:
@@ -51,14 +51,14 @@ class ConnectionStore:
         with self._session() as session:
             type_ = session.exec(select(ConnectionRecord.type).where(ConnectionRecord.name == name)).one_or_none()
         if type_ is None:
-            raise ConnectionNotFoundError("Connection not found.")
+            raise ConnectionNotFoundError()
         return type_
 
     def get(self, name: str) -> ConnectionRecord:
         with self._session() as session:
             record = session.get(ConnectionRecord, name)
         if record is None:
-            raise ConnectionNotFoundError("Connection not found.")
+            raise ConnectionNotFoundError()
         return record
 
     def replace(self, record: ConnectionRecord) -> None:
@@ -69,10 +69,10 @@ class ConnectionStore:
                 .values(type=record.type, settings=record.settings)
             )
             if result.rowcount == 0:
-                raise ConnectionNotFoundError("Connection not found.")
+                raise ConnectionNotFoundError()
 
     def delete(self, name: str) -> None:
         with self._session() as session:
             result = session.connection().execute(delete(ConnectionRecord).where(ConnectionRecord.name == name))
             if result.rowcount == 0:
-                raise ConnectionNotFoundError("Connection not found.")
+                raise ConnectionNotFoundError()

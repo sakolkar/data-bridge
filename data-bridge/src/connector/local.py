@@ -40,9 +40,9 @@ def _filesystem_errors() -> Iterator[None]:
     try:
         yield
     except FileNotFoundError:
-        raise ConnectorFileNotFoundError("File not found.") from None
+        raise ConnectorFileNotFoundError() from None
     except FileExistsError:
-        raise ConnectorFileExistsError("File already exists.") from None
+        raise ConnectorFileExistsError() from None
     except PermissionError:
         raise ConnectorPermissionError(
             "Permission denied by the local filesystem. Check that the service " "user can access the path."
