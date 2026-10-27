@@ -9,7 +9,7 @@ from fastapi.responses import JSONResponse
 from sqlalchemy.exc import SQLAlchemyError
 
 from config import load_settings, prepare_storage
-from connection_store import ConnectionStore
+from controllers.connection import ConnectionController
 from db import fields
 from db.db import Database
 from exceptions import (
@@ -29,7 +29,7 @@ from routes.connection import router as connection_router
 from routes.file import router as file_router
 from routes.transfer import router as transfer_router
 from transfer_manager import TransferManager
-from transfer_store import TransferStore
+from controllers.transfer import TransferController
 
 logger = logging.getLogger(__name__)
 
@@ -48,16 +48,16 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
             database.initialize()
         except SQLAlchemyError:
             raise ConnectionStoreError("Cannot initialize connection storage.") from None
-        store = ConnectionStore(database.session)
-        store.initialize()
-        transfer_store = TransferStore(database.session)
-        transfer_store.initialize()
-        interrupted = transfer_store.fail_interrupted()
+        connection_controller = ConnectionController(database.session)
+        connection_controller.initialize()
+        transfer_controller = TransferController(database.session)
+        transfer_controller.initialize()
+        interrupted = transfer_controller.fail_interrupted()
         if interrupted:
             logger.warning("Marked %d interrupted transfer(s) as failed.", interrupted)
         app.state.settings = settings
-        app.state.connection_store = store
-        app.state.transfer_store = transfer_store
+        app.state.connection_controller = connection_controller
+        app.state.transfer_controller = transfer_controller
         manager = TransferManager(TRANSFER_WORKERS)
         app.state.transfer_manager = manager
         manager.install_signal_handlers()
@@ -65,17 +65,17 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
             yield
         finally:
             try:
-                await _shutdown_transfers(manager, transfer_store)
+                await _shutdown_transfers(manager, transfer_controller)
             finally:
                 manager.restore_signal_handlers()
     finally:
         database.close()
 
 
-async def _shutdown_transfers(manager: TransferManager, transfer_store: TransferStore) -> None:
+async def _shutdown_transfers(manager: TransferManager, transfer_controller: TransferController) -> None:
     cancelled = manager.cancel_queued()
     for transfer_id in cancelled:
-        transfer_store.fail(
+        transfer_controller.fail(
             transfer_id,
             "Transfer was cancelled because the service shut down before it " "started. Start it again.",
         )

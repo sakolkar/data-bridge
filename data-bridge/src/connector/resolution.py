@@ -2,14 +2,14 @@ import json
 
 from pydantic import ValidationError
 
-from connection_store import ConnectionStore
+from controllers.connection import ConnectionController
 from connector import Connector
 from connector.registry import create_connector
 from exceptions import ConnectorOperationError
 
 
-def resolve_connector(store: ConnectionStore, name: str) -> Connector:
-    record = store.get(name)
+def resolve_connector(controller: ConnectionController, name: str) -> Connector:
+    record = controller.get(name)
     try:
         settings = json.loads(record.settings)
         if not isinstance(settings, dict):

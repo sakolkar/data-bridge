@@ -10,7 +10,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy.exc import SQLAlchemyError
 
 from app import app
-from connection_store import ConnectionStore
+from controllers.connection import ConnectionController
 from db.db import Database
 from exceptions import ConfigurationError, ConnectionStoreError
 
@@ -74,12 +74,12 @@ def test_import_does_not_create_storage(secret_key: str, sqlite_path: Path) -> N
     assert not sqlite_path.parent.exists()
 
 
-def test_store_initialization_failure_aborts_startup(
+def test_controller_initialization_failure_aborts_startup(
     monkeypatch: pytest.MonkeyPatch, secret_key: str, sqlite_path: Path
 ) -> None:
     closed = []
 
-    def fail_initialization(self: ConnectionStore) -> None:
+    def fail_initialization(self: ConnectionController) -> None:
         raise ConnectionStoreError("Cannot initialize connection storage.")
 
     original_close = Database.close
@@ -88,7 +88,7 @@ def test_store_initialization_failure_aborts_startup(
         original_close(self)
         closed.append(True)
 
-    monkeypatch.setattr(ConnectionStore, "initialize", fail_initialization)
+    monkeypatch.setattr(ConnectionController, "initialize", fail_initialization)
     monkeypatch.setattr(Database, "close", track_close)
     with pytest.raises(ConnectionStoreError, match="initialize"):
         with TestClient(app):

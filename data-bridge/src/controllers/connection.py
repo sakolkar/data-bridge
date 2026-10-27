@@ -1,12 +1,11 @@
-from collections.abc import Callable, Iterator, Sequence
-from contextlib import AbstractContextManager, contextmanager
+from collections.abc import Sequence
 
 from sqlalchemy import delete, update
 from sqlalchemy.dialects.sqlite import insert
-from sqlalchemy.exc import SQLAlchemyError
-from sqlmodel import Session, select
+from sqlmodel import select
 
 from db.models import ConnectionRecord
+from db.session import SessionController
 from exceptions import (
     ConnectionNotFoundError,
     ConnectionStoreError,
@@ -14,20 +13,8 @@ from exceptions import (
 )
 
 
-class ConnectionStore:
-    def __init__(
-        self,
-        session_factory: Callable[[], AbstractContextManager[Session]],
-    ) -> None:
-        self._session_factory = session_factory
-
-    @contextmanager
-    def _session(self) -> Iterator[Session]:
-        try:
-            with self._session_factory() as session:
-                yield session
-        except SQLAlchemyError:
-            raise ConnectionStoreError() from None
+class ConnectionController(SessionController):
+    error = ConnectionStoreError
 
     def initialize(self) -> None:
         with self._session() as session:

@@ -14,7 +14,7 @@ from fastapi.testclient import TestClient
 
 from app import app
 from db.db import Database
-from transfer_store import TransferStore
+from controllers.transfer import TransferController
 
 
 class FakeSFTP:
@@ -343,20 +343,20 @@ def test_transfer_status_survives_database_restart(
     secret_key: str, sqlite_path: Path
 ) -> None:
     with TestClient(app):
-        store: TransferStore = app.state.transfer_store
-        record = store.create(
+        controller: TransferController = app.state.transfer_controller
+        record = controller.create(
             source="local",
             source_file="source.bin",
             destination="remote",
             destination_file="destination.bin",
         )
-        store.complete(record.id, 7)
+        controller.complete(record.id, 7)
 
     with closing(Database(sqlite_path)) as database:
         database.initialize()
-        restarted_store = TransferStore(database.session)
-        restarted_store.initialize()
-        restored = restarted_store.get(record.id)
+        restarted_controller = TransferController(database.session)
+        restarted_controller.initialize()
+        restored = restarted_controller.get(record.id)
         assert restored.state == "completed"
         assert restored.bytes_transferred == 7
         assert restored.completed_at is not None
@@ -454,8 +454,8 @@ def test_transfers_left_in_progress_are_failed_on_startup(
     secret_key: str, sqlite_path: Path
 ) -> None:
     with TestClient(app):
-        store: TransferStore = app.state.transfer_store
-        record = store.create(
+        controller: TransferController = app.state.transfer_controller
+        record = controller.create(
             source="local",
             source_file="source.bin",
             destination="remote",

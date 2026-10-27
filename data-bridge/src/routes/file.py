@@ -8,13 +8,13 @@ from fastapi.responses import JSONResponse
 
 from connector import Connector
 from connector.resolution import resolve_connector
-from routes.connection import Name, Store
+from routes.connection import Name, Controller
 
 router = APIRouter(prefix="/connection/file")
 
 
-def get_connector(name: Name, store: Store) -> Connector:
-    return resolve_connector(store, name)
+def get_connector(name: Name, controller: Controller) -> Connector:
+    return resolve_connector(controller, name)
 
 
 FileConnector = Annotated[Connector, Depends(get_connector)]

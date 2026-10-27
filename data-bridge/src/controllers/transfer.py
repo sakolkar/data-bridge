@@ -1,29 +1,15 @@
-from collections.abc import Callable, Iterator
-from contextlib import AbstractContextManager, contextmanager
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from uuid import uuid4
 
-from sqlalchemy.exc import SQLAlchemyError
-from sqlmodel import Session, col, select, update
+from sqlmodel import col, select, update
 
 from db.models import TransferRecord, TransferState
+from db.session import SessionController
 from exceptions import TransferNotFoundError, TransferStoreError
 
 
-class TransferStore:
-    def __init__(
-        self,
-        session_factory: Callable[[], AbstractContextManager[Session]],
-    ) -> None:
-        self._session_factory = session_factory
-
-    @contextmanager
-    def _session(self) -> Iterator[Session]:
-        try:
-            with self._session_factory() as session:
-                yield session
-        except SQLAlchemyError:
-            raise TransferStoreError() from None
+class TransferController(SessionController):
+    error = TransferStoreError
 
     def initialize(self) -> None:
         with self._session() as session:
@@ -39,8 +25,8 @@ class TransferStore:
                 .where(col(TransferRecord.state) == TransferState.IN_PROGRESS)
                 .values(
                     state=TransferState.FAILED,
-                    completed_at=datetime.now(timezone.utc),
-                    error="Transfer was interrupted by a service restart. " "Start it again.",
+                    completed_at=datetime.now(UTC),
+                    error="Transfer was interrupted by a service restart. Start it again.",
                 )
             )
             return result.rowcount
@@ -60,7 +46,7 @@ class TransferStore:
             destination=destination,
             destination_file=destination_file,
             state=TransferState.IN_PROGRESS,
-            started_at=datetime.now(timezone.utc),
+            started_at=datetime.now(UTC),
             bytes_transferred=0,
         )
         with self._session() as session:
@@ -76,8 +62,8 @@ class TransferStore:
                 .values(bytes_transferred=byte_count)
             )
 
-    def complete(self, transfer_id: str, byte_count: int) -> TransferRecord:
-        return self._finish(
+    def complete(self, transfer_id: str, byte_count: int) -> None:
+        self._finish(
             transfer_id,
             state=TransferState.COMPLETED,
             bytes_transferred=byte_count,
@@ -89,8 +75,8 @@ class TransferStore:
         transfer_id: str,
         error: str,
         bytes_transferred: int | None = None,
-    ) -> TransferRecord:
-        return self._finish(
+    ) -> None:
+        self._finish(
             transfer_id,
             state=TransferState.FAILED,
             bytes_transferred=bytes_transferred,
@@ -104,22 +90,20 @@ class TransferStore:
         state: TransferState,
         bytes_transferred: int | None,
         error: str | None,
-    ) -> TransferRecord:
+    ) -> None:
         with self._session() as session:
             record = session.get(TransferRecord, transfer_id)
             if record is None:
                 raise TransferNotFoundError()
             record.state = state
-            record.completed_at = datetime.now(timezone.utc)
+            record.completed_at = datetime.now(UTC)
             if bytes_transferred is not None:
                 record.bytes_transferred = bytes_transferred
             record.error = error
-            session.add(record)
-        return record
 
     def get(self, transfer_id: str) -> TransferRecord:
         with self._session() as session:
-            record = session.exec(select(TransferRecord).where(TransferRecord.id == transfer_id)).one_or_none()
+            record = session.get(TransferRecord, transfer_id)
         if record is None:
             raise TransferNotFoundError()
         return record

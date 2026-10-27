@@ -5,18 +5,18 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from fastapi.exceptions import RequestValidationError
 from pydantic import ValidationError
 
-from connection_store import ConnectionStore
+from controllers.connection import ConnectionController
 from connector.registry import public_settings, validate_configuration
 from db.models import ConnectionName, ConnectionRecord
 
 router = APIRouter(prefix="/connection")
 
 
-def get_store(request: Request) -> ConnectionStore:
-    return request.app.state.connection_store
+def get_controller(request: Request) -> ConnectionController:
+    return request.app.state.connection_controller
 
 
-Store = Annotated[ConnectionStore, Depends(get_store)]
+Controller = Annotated[ConnectionController, Depends(get_controller)]
 Name = Annotated[ConnectionName, Query()]
 
 
@@ -49,30 +49,30 @@ def _summary(record: ConnectionRecord) -> dict[str, str]:
 
 
 @router.post("", status_code=201)
-def create_connection(record: Annotated[ConnectionRecord, Depends(get_create_record)], store: Store) -> dict[str, str]:
-    store.create(record)
+def create_connection(record: Annotated[ConnectionRecord, Depends(get_create_record)], controller: Controller) -> dict[str, str]:
+    controller.create(record)
     return _summary(record)
 
 
 @router.get("")
 def get_connection(
-    store: Store, name: Annotated[ConnectionName | None, Query()] = None
+    controller: Controller, name: Annotated[ConnectionName | None, Query()] = None
 ) -> dict[str, str] | list[dict[str, object]]:
     if name is None:
         return [
             {**_summary(record), "settings": public_settings(record.type, json.loads(record.settings))}
-            for record in store.list()
+            for record in controller.list()
         ]
-    return {"name": name, "type": store.get_type(name)}
+    return {"name": name, "type": controller.get_type(name)}
 
 
 @router.put("")
-def replace_connection(record: Record, store: Store) -> dict[str, str]:
-    store.replace(record)
+def replace_connection(record: Record, controller: Controller) -> dict[str, str]:
+    controller.replace(record)
     return _summary(record)
 
 
 @router.delete("", status_code=204)
-def delete_connection(name: Name, store: Store) -> Response:
-    store.delete(name)
+def delete_connection(name: Name, controller: Controller) -> Response:
+    controller.delete(name)
     return Response(status_code=204)

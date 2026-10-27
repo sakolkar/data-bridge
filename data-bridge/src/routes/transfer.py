@@ -8,7 +8,7 @@ from fastapi import APIRouter, Query, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from connection_store import ConnectionStore
+from controllers.connection import ConnectionController
 from connector import Connector
 from connector.resolution import resolve_connector
 from exceptions import (
@@ -19,7 +19,7 @@ from exceptions import (
 )
 from transfer import TransferCancelledError, TransferStepError, transfer_file
 from transfer_manager import TransferManager
-from transfer_store import TransferStore
+from controllers.transfer import TransferController
 
 logger = logging.getLogger(__name__)
 
@@ -44,12 +44,12 @@ class TransferRequest(BaseModel):
         return value
 
 
-def get_transfer_store(request: Request) -> TransferStore:
-    return request.app.state.transfer_store
+def get_transfer_controller(request: Request) -> TransferController:
+    return request.app.state.transfer_controller
 
 
-def get_connection_store(request: Request) -> ConnectionStore:
-    return request.app.state.connection_store
+def get_connection_controller(request: Request) -> ConnectionController:
+    return request.app.state.connection_controller
 
 
 def _failure_message(error: TransferStepError, transfer: TransferRequest) -> str:
@@ -65,7 +65,7 @@ def _failure_message(error: TransferStepError, transfer: TransferRequest) -> str
 
 
 def _run_transfer(
-    transfers: TransferStore,
+    transfers: TransferController,
     transfer_id: str,
     transfer: TransferRequest,
     source: Connector,
@@ -130,7 +130,7 @@ def _run_transfer(
 
 
 def _run_transfer_safely(
-    transfers: TransferStore,
+    transfers: TransferController,
     transfer_id: str,
     transfer: TransferRequest,
     source: Connector,
@@ -163,8 +163,8 @@ def create_transfer(
     transfer: TransferRequest,
     request: Request,
 ) -> JSONResponse:
-    connections = get_connection_store(request)
-    transfers = get_transfer_store(request)
+    connections = get_connection_controller(request)
+    transfers = get_transfer_controller(request)
     manager: TransferManager = request.app.state.transfer_manager
     source: Connector = resolve_connector(connections, transfer.source)
     destination: Connector = resolve_connector(connections, transfer.destination)
@@ -199,5 +199,5 @@ def get_transfer(
     request: Request,
     transfer_id: Annotated[str, Query(min_length=1, max_length=36)],
 ) -> dict[str, object]:
-    record = get_transfer_store(request).get(transfer_id)
+    record = get_transfer_controller(request).get(transfer_id)
     return record.model_dump(mode="json")

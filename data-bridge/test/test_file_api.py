@@ -211,7 +211,7 @@ def test_unknown_connection_returns_not_found(client: TestClient) -> None:
 
 
 def test_unsupported_connector_type_is_rejected(client: TestClient) -> None:
-    app.state.connection_store.create(
+    app.state.connection_controller.create(
         ConnectionRecord(name="future", type="future", settings="{}")
     )
     response = client.get(
@@ -225,9 +225,9 @@ def test_unsupported_connector_type_is_rejected(client: TestClient) -> None:
 def test_invalid_saved_configuration_is_not_exposed(
     client: TestClient, settings: str, caplog: pytest.LogCaptureFixture
 ) -> None:
-    record = app.state.connection_store.get("local-files")
+    record = app.state.connection_controller.get("local-files")
     record.settings = settings
-    app.state.connection_store.replace(record)
+    app.state.connection_controller.replace(record)
     response = client.get(
         "/connection/file", params={"name": "local-files", "action": "list"}
     )

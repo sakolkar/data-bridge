@@ -17,7 +17,7 @@ from sqlalchemy import (
 )
 from sqlalchemy import select, text
 
-from connection_store import ConnectionStore
+from controllers.connection import ConnectionController
 from db.db import Database
 from db.models import ConnectionRecord
 from db import fields
@@ -37,10 +37,10 @@ def database(sqlite_path: Path) -> Iterator[Database]:
 
 
 @pytest.fixture
-def store(secret_key: str, database: Database) -> ConnectionStore:
-    store = ConnectionStore(database.session)
-    store.initialize()
-    return store
+def controller(secret_key: str, database: Database) -> ConnectionController:
+    controller = ConnectionController(database.session)
+    controller.initialize()
+    return controller
 
 
 @pytest.mark.parametrize(
@@ -55,18 +55,18 @@ def test_record_validates_configuration(fields: dict[str, object]) -> None:
 
 
 def test_configuration_survives_restart(
-    store: ConnectionStore, database: Database, secret_key: str, sqlite_path: Path
+    controller: ConnectionController, database: Database, secret_key: str, sqlite_path: Path
 ) -> None:
     request = ConnectionRecord(
         name="source", type="custom", settings="password=private-value;port=22"
     )
     assert "private-value" not in repr(request)
-    store.create(request)
+    controller.create(request)
     database.close()
 
     with closing(Database(sqlite_path)) as restarted_database:
         restarted_database.initialize()
-        restarted = ConnectionStore(restarted_database.session)
+        restarted = ConnectionController(restarted_database.session)
         restarted.initialize()
         configuration = restarted.get("source")
         assert isinstance(configuration, ConnectionRecord)
@@ -77,12 +77,12 @@ def test_configuration_survives_restart(
 
 
 def test_settings_are_encrypted_at_rest(
-    store: ConnectionStore, secret_key: str, sqlite_path: Path
+    controller: ConnectionController, secret_key: str, sqlite_path: Path
 ) -> None:
     request = ConnectionRecord(
         name="source", type="custom", settings="password=private-value"
     )
-    store.create(request)
+    controller.create(request)
 
     engine = create_engine(URL.create("sqlite", database=str(sqlite_path)))
     try:
@@ -115,55 +115,55 @@ def test_model_transparently_round_trips_settings(
 
 
 def test_duplicate_names_do_not_replace_existing_configuration(
-    store: ConnectionStore,
+    controller: ConnectionController,
 ) -> None:
     original = ConnectionRecord(name="source", type="custom", settings="original")
-    store.create(original)
+    controller.create(original)
     with pytest.raises(DuplicateConnectionError):
-        store.create(ConnectionRecord(name="source", type="other", settings=""))
+        controller.create(ConnectionRecord(name="source", type="other", settings=""))
 
-    assert store.get("source").settings == original.settings
-    store.create(
+    assert controller.get("source").settings == original.settings
+    controller.create(
         ConnectionRecord(name="Source", type=original.type, settings=original.settings)
     )
-    assert [item.name for item in store.list()] == ["Source", "source"]
+    assert [item.name for item in controller.list()] == ["Source", "source"]
 
 
 def test_replacement_and_deletion_are_persistent(
-    store: ConnectionStore, secret_key: str, sqlite_path: Path
+    controller: ConnectionController, secret_key: str, sqlite_path: Path
 ) -> None:
-    store.create(ConnectionRecord(name="source", type="first", settings="old"))
+    controller.create(ConnectionRecord(name="source", type="first", settings="old"))
     replacement = ConnectionRecord(name="source", type="second", settings="new")
-    store.replace(replacement)
+    controller.replace(replacement)
 
     with closing(Database(sqlite_path)) as restarted_database:
-        restarted = ConnectionStore(restarted_database.session)
+        restarted = ConnectionController(restarted_database.session)
         assert restarted.get("source").type == "second"
         assert restarted.get("source").settings == replacement.settings
         restarted.delete("source")
-    assert store.list() == []
+    assert controller.list() == []
     with pytest.raises(ConnectionNotFoundError):
-        store.get("source")
+        controller.get("source")
 
 
-def test_missing_connections_are_distinguishable(store: ConnectionStore) -> None:
+def test_missing_connections_are_distinguishable(controller: ConnectionController) -> None:
     with pytest.raises(ConnectionNotFoundError):
-        store.get("missing")
+        controller.get("missing")
     with pytest.raises(ConnectionNotFoundError):
-        store.get_type("missing")
+        controller.get_type("missing")
     with pytest.raises(ConnectionNotFoundError):
-        store.replace(ConnectionRecord(name="missing", type="custom", settings=""))
+        controller.replace(ConnectionRecord(name="missing", type="custom", settings=""))
     with pytest.raises(ConnectionNotFoundError):
-        store.delete("missing")
+        controller.delete("missing")
 
 
 @pytest.mark.parametrize("invalid_token", [False, True])
 def test_decryption_failure_raises_store_error(
-    store: ConnectionStore,
+    controller: ConnectionController,
     sqlite_path: Path,
     invalid_token: bool,
 ) -> None:
-    store.create(
+    controller.create(
         ConnectionRecord(
             name="source", type="custom", settings="password=private-value"
         ),
@@ -182,14 +182,14 @@ def test_decryption_failure_raises_store_error(
     if not invalid_token:
         fields.configure(Fernet.generate_key().decode("ascii"))
     with closing(Database(sqlite_path)) as restarted_database:
-        restarted = ConnectionStore(restarted_database.session)
+        restarted = ConnectionController(restarted_database.session)
         with pytest.raises(ConnectionStoreError, match="decrypt"):
             restarted.get("source")
         assert restarted.get_type("source") == "custom"
 
 
 def test_storage_failure_is_not_an_empty_list(
-    store: ConnectionStore, sqlite_path: Path
+    controller: ConnectionController, sqlite_path: Path
 ) -> None:
     engine = create_engine(URL.create("sqlite", database=str(sqlite_path)))
     try:
@@ -197,7 +197,7 @@ def test_storage_failure_is_not_an_empty_list(
     finally:
         engine.dispose()
     with pytest.raises(ConnectionStoreError, match="unavailable"):
-        store.list()
+        controller.list()
 
 
 def test_initialize_preserves_unrelated_tables(
@@ -213,10 +213,10 @@ def test_initialize_preserves_unrelated_tables(
             database.execute(unrelated.insert().values(value="existing data"))
         with closing(Database(sqlite_path)) as storage:
             storage.initialize()
-            store = ConnectionStore(storage.session)
-            store.initialize()
+            controller = ConnectionController(storage.session)
+            controller.initialize()
             storage.initialize()
-            store.initialize()
+            controller.initialize()
         with engine.connect() as database:
             assert (
                 database.execute(select(unrelated.c.value)).scalar_one()
@@ -238,9 +238,9 @@ def test_incompatible_schema_is_not_silently_accepted(
         metadata.create_all(engine)
         with closing(Database(sqlite_path)) as storage:
             storage.initialize()
-            store = ConnectionStore(storage.session)
+            controller = ConnectionController(storage.session)
             with pytest.raises(ConnectionStoreError):
-                store.initialize()
+                controller.initialize()
     finally:
         engine.dispose()
 
@@ -271,14 +271,14 @@ def test_existing_encrypted_text_database_is_compatible(
             )
         with closing(Database(sqlite_path)) as storage:
             storage.initialize()
-            store = ConnectionStore(storage.session)
-            store.initialize()
-            assert store.get("source").settings == "password=private-value"
-            listed = store.list()[0]
+            controller = ConnectionController(storage.session)
+            controller.initialize()
+            assert controller.get("source").settings == "password=private-value"
+            listed = controller.list()[0]
             assert listed.name == "source"
             assert listed.type == "custom"
-            assert listed.settings == store.get("source").settings
-            store.replace(
+            assert listed.settings == controller.get("source").settings
+            controller.replace(
                 ConnectionRecord(name="source", type="updated", settings="port=22")
             )
         with engine.connect() as database:

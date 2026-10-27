@@ -7,7 +7,7 @@ from fastapi.testclient import TestClient
 
 from app import app
 from exceptions import ConnectionStoreError
-from routes.connection import get_store
+from routes.connection import get_controller
 
 
 @pytest.fixture
@@ -40,7 +40,7 @@ def test_configuration_crud(client: TestClient) -> None:
     assert replaced.status_code == 200
     assert replaced.json() == {"name": "source", "type": "local"}
     assert (
-        json.loads(app.state.connection_store.get("source").settings)["path"]
+        json.loads(app.state.connection_controller.get("source").settings)["path"]
         == "replacement"
     )
 
@@ -195,7 +195,7 @@ def test_unimplemented_connection_types_are_rejected(
     assert client.get("/connection").json() == [
         {"name": "source", "type": "local", "settings": {"path": "/original"}}
     ]
-    assert json.loads(app.state.connection_store.get("source").settings) == {
+    assert json.loads(app.state.connection_controller.get("source").settings) == {
         "path": "/original"
     }
 
@@ -209,7 +209,7 @@ def test_local_configuration_crud(client: TestClient, tmp_path: Path) -> None:
     created = client.post("/connection", json=body)
     assert created.status_code == 201
     assert created.json() == expected
-    assert json.loads(app.state.connection_store.get("local-files").settings) == {
+    assert json.loads(app.state.connection_controller.get("local-files").settings) == {
         "path": home
     }
     assert client.post("/connection", json=body).status_code == 409
@@ -224,7 +224,7 @@ def test_local_configuration_crud(client: TestClient, tmp_path: Path) -> None:
     )
     assert updated.status_code == 200
     assert updated.json() == expected
-    assert json.loads(app.state.connection_store.get("local-files").settings) == {
+    assert json.loads(app.state.connection_controller.get("local-files").settings) == {
         "path": replacement
     }
     assert client.delete("/connection", params=params).status_code == 204
@@ -271,7 +271,7 @@ def test_local_configuration_persists_encrypted(
         assert response.status_code == 201
     assert home.encode() not in sqlite_path.read_bytes()
     with TestClient(app):
-        assert json.loads(app.state.connection_store.get("local-files").settings) == {
+        assert json.loads(app.state.connection_controller.get("local-files").settings) == {
             "path": home
         }
 
@@ -334,14 +334,14 @@ def test_invalid_sftp_configuration_does_not_echo_password(
 def test_store_errors_are_logged_without_secrets(
     client: TestClient, caplog: pytest.LogCaptureFixture
 ) -> None:
-    def unavailable_store() -> None:
+    def unavailable_controller() -> None:
         raise ConnectionStoreError("private-value")
 
-    app.dependency_overrides[get_store] = unavailable_store
+    app.dependency_overrides[get_controller] = unavailable_controller
     try:
         response = client.get("/connection")
     finally:
-        del app.dependency_overrides[get_store]
+        del app.dependency_overrides[get_controller]
     assert response.status_code == 500
     assert response.json() == {"detail": "Connection storage is unavailable."}
     assert "Connection storage operation failed." in caplog.text
@@ -366,6 +366,6 @@ def test_configuration_persists_through_new_lifespan(
         assert response.status_code == 200
         assert response.json() == {"name": "persisted", "type": "local"}
         assert (
-            json.loads(app.state.connection_store.get("persisted").settings)["path"]
+            json.loads(app.state.connection_controller.get("persisted").settings)["path"]
             == "password=private-value"
         )
