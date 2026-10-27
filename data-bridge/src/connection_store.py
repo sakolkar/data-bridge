@@ -46,20 +46,13 @@ class ConnectionStore:
 
     def list(self) -> list[dict[str, str]]:
         with self._session() as session:
-            rows = session.exec(
-                select(ConnectionRecord).order_by(ConnectionRecord.name)
-            ).all()
-        return [
-            {"name": row.name, "type": row.type, "settings": row.settings}
-            for row in rows
-        ]
+            rows = session.exec(select(ConnectionRecord).order_by(ConnectionRecord.name)).all()
+        return [{"name": row.name, "type": row.type, "settings": row.settings} for row in rows]
 
     def get_metadata(self, name: str) -> dict[str, str]:
         with self._session() as session:
             row = session.exec(
-                select(ConnectionRecord.name, ConnectionRecord.type).where(
-                    ConnectionRecord.name == name
-                )
+                select(ConnectionRecord.name, ConnectionRecord.type).where(ConnectionRecord.name == name)
             ).one_or_none()
         if row is None:
             raise ConnectionNotFoundError("Connection not found.")
@@ -85,8 +78,6 @@ class ConnectionStore:
 
     def delete(self, name: str) -> None:
         with self._session() as session:
-            result = session.connection().execute(
-                delete(ConnectionRecord).where(ConnectionRecord.name == name)
-            )
+            result = session.connection().execute(delete(ConnectionRecord).where(ConnectionRecord.name == name))
             if result.rowcount == 0:
                 raise ConnectionNotFoundError("Connection not found.")

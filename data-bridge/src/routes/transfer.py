@@ -40,9 +40,7 @@ class TransferRequest(BaseModel):
     @classmethod
     def validate_file_path(cls, value: str) -> str:
         if not value.strip() or "\x00" in value:
-            raise ValueError(
-                "File path must be nonblank and contain no null characters."
-            )
+            raise ValueError("File path must be nonblank and contain no null characters.")
         return value
 
 
@@ -99,8 +97,7 @@ def _run_transfer(
         )
     except TransferCancelledError as error:
         logger.warning(
-            "Transfer %s stopped by shutdown after %d bytes; destination "
-            "'%s:%s' may be incomplete.",
+            "Transfer %s stopped by shutdown after %d bytes; destination " "'%s:%s' may be incomplete.",
             transfer_id,
             error.bytes_transferred,
             transfer.destination,

@@ -1,12 +1,18 @@
 from datetime import datetime
-from enum import Enum
+from enum import StrEnum
 from typing import Annotated
 
-from pydantic import AfterValidator, ConfigDict, field_validator
+from pydantic import AfterValidator, ConfigDict
 from sqlalchemy import String
 from sqlmodel import Field, SQLModel
 
 from db.fields import EncryptedString
+
+
+def _validate_nonblank(value: str) -> str:
+    if not value.strip():
+        raise ValueError("Value must be nonblank.")
+    return value
 
 
 def _validate_connection_name(value: str) -> str:
@@ -26,25 +32,12 @@ class ConnectionRecord(SQLModel, table=True):
     __tablename__ = "connection"
     model_config = ConfigDict(extra="forbid")
 
-    name: ConnectionName = Field(
-        primary_key=True, sa_type=String(128, collation="BINARY")
-    )
-    type: str = Field(min_length=1, max_length=64)
-    settings: str = Field(
-        sa_type=EncryptedString,
-        repr=False,
-        schema_extra={"json_schema_extra": {"writeOnly": True}},
-    )
-
-    @field_validator("type")
-    @classmethod
-    def validate_type(cls, value: str) -> str:
-        if not value.strip():
-            raise ValueError("Type must be nonblank.")
-        return value
+    name: ConnectionName = Field(primary_key=True, sa_type=String(128, collation="BINARY"))
+    type: Annotated[str, AfterValidator(_validate_nonblank)] = Field(min_length=1, max_length=64)
+    settings: str = Field(sa_type=EncryptedString, repr=False)
 
 
-class TransferState(str, Enum):
+class TransferState(StrEnum):
     IN_PROGRESS = "in_progress"
     COMPLETED = "completed"
     FAILED = "failed"
@@ -52,15 +45,14 @@ class TransferState(str, Enum):
 
 class TransferRecord(SQLModel, table=True):
     __tablename__ = "transfer"
-    model_config = ConfigDict(extra="forbid")
 
-    id: str = Field(primary_key=True, max_length=36)
-    source: ConnectionName
+    id: str = Field(primary_key=True)
+    source: str
     source_file: str
-    destination: ConnectionName
+    destination: str
     destination_file: str
     state: TransferState
     started_at: datetime
     completed_at: datetime | None = None
-    bytes_transferred: int | None = Field(default=None, ge=0)
+    bytes_transferred: int | None = None
     error: str | None = None

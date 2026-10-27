@@ -40,8 +40,7 @@ class TransferStore:
                 .values(
                     state=TransferState.FAILED,
                     completed_at=datetime.now(timezone.utc),
-                    error="Transfer was interrupted by a service restart. "
-                    "Start it again.",
+                    error="Transfer was interrupted by a service restart. " "Start it again.",
                 )
             )
             return result.rowcount
@@ -120,9 +119,7 @@ class TransferStore:
 
     def get(self, transfer_id: str) -> TransferRecord:
         with self._session() as session:
-            record = session.exec(
-                select(TransferRecord).where(TransferRecord.id == transfer_id)
-            ).one_or_none()
+            record = session.exec(select(TransferRecord).where(TransferRecord.id == transfer_id)).one_or_none()
         if record is None:
             raise TransferNotFoundError("Transfer not found.")
         return record

@@ -32,9 +32,7 @@ def get_create_record(body: dict[str, object]) -> ConnectionRecord:
             }
         )
     except ValidationError as error:
-        raise RequestValidationError(
-            [{**item, "loc": ("body", *item["loc"])} for item in error.errors()]
-        ) from None
+        raise RequestValidationError([{**item, "loc": ("body", *item["loc"])} for item in error.errors()]) from None
 
 
 def get_record(name: Name, body: dict[str, object]) -> ConnectionRecord:
@@ -47,9 +45,7 @@ Record = Annotated[ConnectionRecord, Depends(get_record)]
 
 
 @router.post("", status_code=201)
-def create_connection(
-    record: Annotated[ConnectionRecord, Depends(get_create_record)], store: Store
-) -> dict[str, str]:
+def create_connection(record: Annotated[ConnectionRecord, Depends(get_create_record)], store: Store) -> dict[str, str]:
     return store.create(record)
 
 
@@ -61,9 +57,7 @@ def get_connection(
         return [
             {
                 **record,
-                "settings": public_settings(
-                    record["type"], json.loads(record["settings"])
-                ),
+                "settings": public_settings(record["type"], json.loads(record["settings"])),
             }
             for record in store.list()
         ]

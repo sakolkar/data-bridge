@@ -1,38 +1,37 @@
-from sqlalchemy.types import TypeDecorator, String
-from cryptography.fernet import Fernet
-from config import load_settings
+from cryptography.fernet import Fernet, InvalidToken
+from sqlalchemy.types import String, TypeDecorator
 
-settings = load_settings()
+from exceptions import ConnectionStoreError
+
+_fernet: Fernet | None = None
+
+
+def configure(secret_key: str) -> None:
+    global _fernet
+    _fernet = Fernet(secret_key)
+
+
+def _get_fernet() -> Fernet:
+    if _fernet is None:
+        raise ConnectionStoreError("Encryption is not configured.")
+    return _fernet
 
 
 class EncryptedString(TypeDecorator):
-    """
-    Transparently encrypts a String column on write and decrypts on read.
-    Stores the data as a string representing the encrypted token.
-    """
+    """A String column stored as a Fernet token."""
 
     impl = String
     cache_ok = True
 
     def process_bind_param(self, value, dialect):
-        """
-        Encrypt the data before saving it to the database.
-        """
-        if value is not None:
-            fernet = Fernet(settings.secret_key)
-            encrypted_bytes = fernet.encrypt(value.encode("utf-8"))
-            return encrypted_bytes.decode("utf-8")
-        return value
+        if value is None:
+            return None
+        return _get_fernet().encrypt(value.encode()).decode()
 
     def process_result_value(self, value, dialect):
-        """
-        Decrypt the data when loading it from the database.
-        """
-        if value is not None:
-            try:
-                fernet = Fernet(settings.secret_key)
-                decrypted_bytes = fernet.decrypt(value.encode("utf-8"))
-                return decrypted_bytes.decode("utf-8")
-            except Exception:
-                return "[DECRYPTION_FAILED]"
-        return value
+        if value is None:
+            return None
+        try:
+            return _get_fernet().decrypt(value.encode()).decode()
+        except InvalidToken:
+            raise ConnectionStoreError("Cannot decrypt stored connection settings.") from None

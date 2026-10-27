@@ -58,9 +58,7 @@ def _is_secret(field: FieldInfo) -> bool:
     return isinstance(extra, dict) and extra.get("writeOnly") is True
 
 
-def public_settings(
-    connection_type: str, settings: dict[str, object]
-) -> dict[str, object]:
+def public_settings(connection_type: str, settings: dict[str, object]) -> dict[str, object]:
     """
     Return stored settings without write-only fields such as passwords.
     """
@@ -68,9 +66,7 @@ def public_settings(
     if connector is None:
         return {}
     config_model, _ = connector
-    secrets = {
-        name for name, field in config_model.model_fields.items() if _is_secret(field)
-    }
+    secrets = {name for name, field in config_model.model_fields.items() if _is_secret(field)}
     return {key: value for key, value in settings.items() if key not in secrets}
 
 

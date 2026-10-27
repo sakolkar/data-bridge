@@ -17,9 +17,7 @@ class TransferManager:
     """
 
     def __init__(self, max_workers: int) -> None:
-        self._executor = ThreadPoolExecutor(
-            max_workers=max_workers, thread_name_prefix="transfer"
-        )
+        self._executor = ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix="transfer")
         self._lock = threading.Lock()
         self._futures: dict[str, Future[None]] = {}
         self._running: set[str] = set()
@@ -63,11 +61,7 @@ class TransferManager:
         Cancel transfers that have not started and return their identifiers.
         """
         with self._lock:
-            cancelled = [
-                transfer_id
-                for transfer_id, future in self._futures.items()
-                if future.cancel()
-            ]
+            cancelled = [transfer_id for transfer_id, future in self._futures.items() if future.cancel()]
             for transfer_id in cancelled:
                 del self._futures[transfer_id]
         return cancelled

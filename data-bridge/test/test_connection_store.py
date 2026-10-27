@@ -20,8 +20,7 @@ from sqlalchemy import select, text
 from connection_store import ConnectionStore
 from db.db import Database
 from db.models import ConnectionRecord
-import db.fields as encrypted_fields
-from config import Settings
+from db import fields
 from exceptions import (
     ConnectionNotFoundError,
     ConnectionStoreError,
@@ -159,12 +158,10 @@ def test_missing_connections_are_distinguishable(store: ConnectionStore) -> None
 
 
 @pytest.mark.parametrize("invalid_token", [False, True])
-def test_decryption_failures_preserve_field_behavior(
+def test_decryption_failure_raises_store_error(
     store: ConnectionStore,
-    secret_key: str,
     sqlite_path: Path,
     invalid_token: bool,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     store.create(
         ConnectionRecord(
@@ -182,13 +179,13 @@ def test_decryption_failures_preserve_field_behavior(
         finally:
             engine.dispose()
 
-    key = secret_key if invalid_token else Fernet.generate_key().decode("ascii")
-    monkeypatch.setattr(encrypted_fields, "settings", Settings(sqlite_path, key))
+    if not invalid_token:
+        fields.configure(Fernet.generate_key().decode("ascii"))
     with closing(Database(sqlite_path)) as restarted_database:
         restarted = ConnectionStore(restarted_database.session)
-        assert restarted.get("source").settings == "[DECRYPTION_FAILED]"
+        with pytest.raises(ConnectionStoreError, match="decrypt"):
+            restarted.get("source")
         assert restarted.get_metadata("source")["name"] == "source"
-        assert len(restarted.list()) == 1
 
 
 def test_storage_failure_is_not_an_empty_list(

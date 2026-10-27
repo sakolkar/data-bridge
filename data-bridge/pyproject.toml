@@ -6,3 +6,6 @@ filterwarnings = [
     # Ignore warning from starlette package
     "ignore::DeprecationWarning:starlette.testclient",
 ]
+
+[tool.black]
+line-length = 120

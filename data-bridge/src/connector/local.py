@@ -45,8 +45,7 @@ def _filesystem_errors() -> Iterator[None]:
         raise ConnectorFileExistsError("File already exists.") from None
     except PermissionError:
         raise ConnectorPermissionError(
-            "Permission denied by the local filesystem. Check that the service "
-            "user can access the path."
+            "Permission denied by the local filesystem. Check that the service " "user can access the path."
         ) from None
     except OSError:
         raise ConnectorOperationError("Local file operation failed.") from None
@@ -54,11 +53,7 @@ def _filesystem_errors() -> Iterator[None]:
 
 class LocalConnector(Connector):
     def __init__(self, path: str | Path) -> None:
-        if (
-            not isinstance(path, (str, Path))
-            or not str(path).strip()
-            or "\x00" in str(path)
-        ):
+        if not isinstance(path, (str, Path)) or not str(path).strip() or "\x00" in str(path):
             raise InvalidConnectorArgumentError("A home directory path is required.")
         with _filesystem_errors():
             self.path = Path(path).resolve(strict=True)
@@ -70,15 +65,11 @@ class LocalConnector(Connector):
             raise InvalidConnectorArgumentError("A relative file path is required.")
         relative = Path(path)
         if relative.is_absolute() or ".." in relative.parts:
-            raise InvalidConnectorArgumentError(
-                "Path must stay within the home directory."
-            )
+            raise InvalidConnectorArgumentError("Path must stay within the home directory.")
         candidate = self.path / relative
         resolved = candidate.resolve()
         if not resolved.is_relative_to(self.path):
-            raise InvalidConnectorArgumentError(
-                "Path must stay within the home directory."
-            )
+            raise InvalidConnectorArgumentError("Path must stay within the home directory.")
         return candidate
 
     def list(self, recursive: bool = False) -> list[FileEntry]:
@@ -120,9 +111,7 @@ class LocalConnector(Connector):
 
     def iter_read(self, path: str, chunk_size: int = 64 * 1024) -> Iterator[bytes]:
         if type(chunk_size) is not int or chunk_size <= 0:
-            raise InvalidConnectorArgumentError(
-                "Chunk size must be a positive integer."
-            )
+            raise InvalidConnectorArgumentError("Chunk size must be a positive integer.")
         with _filesystem_errors():
             with self._resolve(path).open("rb") as stream:
                 while chunk := stream.read(chunk_size):
@@ -136,9 +125,7 @@ class LocalConnector(Connector):
         if mode not in ("create", "replace"):
             raise InvalidConnectorArgumentError("Invalid file write mode.")
         with _filesystem_errors():
-            with self._resolve(path).open(
-                "xb" if mode == "create" else "r+b"
-            ) as stream:
+            with self._resolve(path).open("xb" if mode == "create" else "r+b") as stream:
                 stream.write(data)
                 if mode == "replace":
                     stream.truncate()
@@ -154,9 +141,7 @@ class LocalConnector(Connector):
             raise InvalidConnectorArgumentError("Invalid file write mode.")
         total = 0
         with _filesystem_errors():
-            with self._resolve(path).open(
-                "xb" if mode == "create" else "r+b"
-            ) as stream:
+            with self._resolve(path).open("xb" if mode == "create" else "r+b") as stream:
                 for chunk in chunks:
                     if not isinstance(chunk, bytes):
                         raise InvalidConnectorArgumentError("File data must be bytes.")
@@ -169,9 +154,7 @@ class LocalConnector(Connector):
         # TODO: determine file type and pass along to appropriate implementation of file handler
 
         if any(type(limit) is not int or limit <= 0 for limit in (lines, max_bytes)):
-            raise InvalidConnectorArgumentError(
-                "Head limits must be positive integers."
-            )
+            raise InvalidConnectorArgumentError("Head limits must be positive integers.")
         with _filesystem_errors():
             with self._resolve(path).open("rb") as stream:
                 chunks = []

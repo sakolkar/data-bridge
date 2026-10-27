@@ -10,6 +10,7 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from config import load_settings, prepare_storage
 from connection_store import ConnectionStore
+from db import fields
 from db.db import Database
 from exceptions import (
     ConnectionNotFoundError,
@@ -39,15 +40,14 @@ TRANSFER_WORKERS = 4
 async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     settings = load_settings()
     prepare_storage(settings)
+    fields.configure(settings.secret_key)
     database = Database(settings.sqlite_path)
     app.state.database = database
     try:
         try:
             database.initialize()
         except SQLAlchemyError:
-            raise ConnectionStoreError(
-                "Cannot initialize connection storage."
-            ) from None
+            raise ConnectionStoreError("Cannot initialize connection storage.") from None
         store = ConnectionStore(database.session)
         store.initialize()
         transfer_store = TransferStore(database.session)
@@ -72,20 +72,15 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
         database.close()
 
 
-async def _shutdown_transfers(
-    manager: TransferManager, transfer_store: TransferStore
-) -> None:
+async def _shutdown_transfers(manager: TransferManager, transfer_store: TransferStore) -> None:
     cancelled = manager.cancel_queued()
     for transfer_id in cancelled:
         transfer_store.fail(
             transfer_id,
-            "Transfer was cancelled because the service shut down before it "
-            "started. Start it again.",
+            "Transfer was cancelled because the service shut down before it " "started. Start it again.",
         )
     if cancelled:
-        logger.warning(
-            "Cancelled %d queued transfer(s) that had not started.", len(cancelled)
-        )
+        logger.warning("Cancelled %d queued transfer(s) that had not started.", len(cancelled))
 
     running = manager.running
     if running and not manager.stopping:
@@ -108,9 +103,7 @@ app.include_router(transfer_router)
 
 
 @app.exception_handler(RequestValidationError)
-async def validation_error_handler(
-    request: Request, error: RequestValidationError
-) -> JSONResponse:
+async def validation_error_handler(request: Request, error: RequestValidationError) -> JSONResponse:
     details = []
     for item in error.errors():
         location = list(item["loc"])
@@ -121,35 +114,25 @@ async def validation_error_handler(
 
 
 @app.exception_handler(ConnectionStoreError)
-async def connection_error_handler(
-    request: Request, error: ConnectionStoreError
-) -> JSONResponse:
+async def connection_error_handler(request: Request, error: ConnectionStoreError) -> JSONResponse:
     if isinstance(error, DuplicateConnectionError):
         return JSONResponse(status_code=409, content={"detail": str(error)})
     if isinstance(error, ConnectionNotFoundError):
         return JSONResponse(status_code=404, content={"detail": str(error)})
     logger.error("Connection storage operation failed.")
-    return JSONResponse(
-        status_code=500, content={"detail": "Connection storage is unavailable."}
-    )
+    return JSONResponse(status_code=500, content={"detail": "Connection storage is unavailable."})
 
 
 @app.exception_handler(TransferStoreError)
-async def transfer_store_error_handler(
-    request: Request, error: TransferStoreError
-) -> JSONResponse:
+async def transfer_store_error_handler(request: Request, error: TransferStoreError) -> JSONResponse:
     if isinstance(error, TransferNotFoundError):
         return JSONResponse(status_code=404, content={"detail": str(error)})
     logger.error("Transfer storage operation failed.")
-    return JSONResponse(
-        status_code=500, content={"detail": "Transfer storage is unavailable."}
-    )
+    return JSONResponse(status_code=500, content={"detail": "Transfer storage is unavailable."})
 
 
 @app.exception_handler(ConnectorError)
-async def connector_error_handler(
-    request: Request, error: ConnectorError
-) -> JSONResponse:
+async def connector_error_handler(request: Request, error: ConnectorError) -> JSONResponse:
     if isinstance(error, ConnectorFileNotFoundError):
         return JSONResponse(status_code=404, content={"detail": str(error)})
     if isinstance(error, ConnectorFileExistsError):
@@ -159,9 +142,7 @@ async def connector_error_handler(
     if isinstance(error, ConnectorPermissionError):
         return JSONResponse(status_code=403, content={"detail": str(error)})
     if isinstance(error, ConnectorUnavailableError):
-        logger.warning(
-            "Connector unavailable. %s %s: %s", request.method, request.url.path, error
-        )
+        logger.warning("Connector unavailable. %s %s: %s", request.method, request.url.path, error)
         return JSONResponse(status_code=502, content={"detail": str(error)})
     logger.error(
         "Connector operation failed. %s %s raised %s.",

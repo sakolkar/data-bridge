@@ -38,9 +38,7 @@ class Connector(ABC):
         """
 
     @abstractmethod
-    def iter_read(
-        self, path: str, chunk_size: int = TRANSFER_CHUNK_SIZE
-    ) -> Iterator[bytes]:
+    def iter_read(self, path: str, chunk_size: int = TRANSFER_CHUNK_SIZE) -> Iterator[bytes]:
         """
         Yield file contents in bounded byte chunks without buffering the file.
         """

@@ -1,14 +1,10 @@
-import base64
-import binascii
 import os
-import re
 import sqlite3
 import stat
 from contextlib import closing
 from dataclasses import dataclass, field
 from pathlib import Path
 from cryptography.fernet import Fernet
-
 
 from exceptions import ConfigurationError
 
@@ -26,23 +22,19 @@ def _required_env(name: str) -> str:
     return value
 
 
-def _validate_secret_key(key: str) -> None:
+def _validate_secret_key(key: str) -> str:
     try:
         Fernet(key.encode())
-        return key
     except (ValueError, TypeError):
-        raise ConfigurationError(
-            "DATABRIDGE_SECRET_KEY must be a valid Fernet key."
-        ) from None
+        raise ConfigurationError("DATABRIDGE_SECRET_KEY must be a valid Fernet key.") from None
+    return key
 
 
 def _validate_database_path(value: str) -> Path:
     try:
         path = Path(value)
         if not path.is_absolute():
-            raise ConfigurationError(
-                "DATABRIDGE_SQLITE_PATH must be an absolute file path."
-            )
+            raise ConfigurationError("DATABRIDGE_SQLITE_PATH must be an absolute file path.")
         path = path.resolve()
         try:
             mode = path.stat().st_mode
@@ -52,16 +44,12 @@ def _validate_database_path(value: str) -> Path:
             raise ConfigurationError("DATABRIDGE_SQLITE_PATH must name a regular file.")
         with closing(sqlite3.connect(f"{path.as_uri()}?mode=ro", uri=True)) as database:
             if database.execute("PRAGMA integrity_check").fetchall() != [("ok",)]:
-                raise ConfigurationError(
-                    "DATABRIDGE_SQLITE_PATH must contain a valid SQLite database."
-                )
+                raise ConfigurationError("DATABRIDGE_SQLITE_PATH must contain a valid SQLite database.")
         return path
     except ConfigurationError:
         raise
     except sqlite3.Error:
-        raise ConfigurationError(
-            "DATABRIDGE_SQLITE_PATH must contain a readable, valid SQLite database."
-        ) from None
+        raise ConfigurationError("DATABRIDGE_SQLITE_PATH must contain a readable, valid SQLite database.") from None
     except (OSError, RuntimeError, ValueError):
         raise ConfigurationError(
             "Cannot resolve DATABRIDGE_SQLITE_PATH. Check the path, permissions, and symlinks."

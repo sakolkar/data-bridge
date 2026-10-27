@@ -16,6 +16,4 @@ def resolve_connector(store: ConnectionStore, name: str) -> Connector:
             raise ConnectorOperationError("Stored connection configuration is invalid.")
         return create_connector(record.type, settings)
     except (json.JSONDecodeError, ValidationError):
-        raise ConnectorOperationError(
-            "Stored connection configuration is invalid."
-        ) from None
+        raise ConnectorOperationError("Stored connection configuration is invalid.") from None

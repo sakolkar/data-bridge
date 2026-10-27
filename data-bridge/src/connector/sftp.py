@@ -65,8 +65,7 @@ def _sftp_errors(path: str | None = None) -> Iterator[None]:
         ) from None
     except paramiko.BadHostKeyException:
         raise ConnectorUnavailableError(
-            "SFTP host key verification failed. Verify the server host key and "
-            "the service user's known_hosts file."
+            "SFTP host key verification failed. Verify the server host key and " "the service user's known_hosts file."
         ) from None
     except NoValidConnectionsError:
         raise ConnectorUnavailableError(
@@ -107,8 +106,7 @@ def _sftp_errors(path: str | None = None) -> Iterator[None]:
             errno.ENETUNREACH,
         ):
             raise ConnectorUnavailableError(
-                "Could not reach the SFTP server. Check the host, port, and "
-                "whether the server is running."
+                "Could not reach the SFTP server. Check the host, port, and " "whether the server is running."
             ) from None
         logger.warning(
             "SFTP file operation on %r failed (errno=%s): %s",
@@ -116,23 +114,18 @@ def _sftp_errors(path: str | None = None) -> Iterator[None]:
             error.errno,
             error.strerror or error,
         )
-        raise ConnectorOperationError(
-            "SFTP file operation failed. Check the remote path and permissions."
-        ) from None
+        raise ConnectorOperationError("SFTP file operation failed. Check the remote path and permissions.") from None
     except paramiko.SSHException:
         raise ConnectorUnavailableError(
-            "The SSH handshake failed. Verify that the server supports SSH/SFTP "
-            "and that its host key is trusted."
+            "The SSH handshake failed. Verify that the server supports SSH/SFTP " "and that its host key is trusted."
         ) from None
     except EOFError:
         raise ConnectorUnavailableError(
-            "The SFTP server closed the connection unexpectedly. Check server "
-            "availability."
+            "The SFTP server closed the connection unexpectedly. Check server " "availability."
         ) from None
     except paramiko.SFTPError:
         raise ConnectorOperationError(
-            "The SFTP server rejected the operation. Check the remote path and "
-            "permissions."
+            "The SFTP server rejected the operation. Check the remote path and " "permissions."
         ) from None
 
 
@@ -182,9 +175,7 @@ class SFTPConnector(Connector):
             raise InvalidConnectorArgumentError("A relative file path is required.")
         relative = PurePosixPath(path)
         if relative.is_absolute() or ".." in relative.parts:
-            raise InvalidConnectorArgumentError(
-                "Path must stay within the home directory."
-            )
+            raise InvalidConnectorArgumentError("Path must stay within the home directory.")
         return relative.as_posix()
 
     @staticmethod
@@ -234,9 +225,7 @@ class SFTPConnector(Connector):
     def iter_read(self, path: str, chunk_size: int = 64 * 1024) -> Iterator[bytes]:
         resolved = self._resolve(path)
         if type(chunk_size) is not int or chunk_size <= 0:
-            raise InvalidConnectorArgumentError(
-                "Chunk size must be a positive integer."
-            )
+            raise InvalidConnectorArgumentError("Chunk size must be a positive integer.")
         with self._client() as sftp:
             with _sftp_errors(resolved), sftp.open(resolved, "rb") as stream:
                 size = stream.stat().st_size
@@ -253,10 +242,7 @@ class SFTPConnector(Connector):
                     end = min(start + window, size)
                     blocks = list(
                         stream.readv(
-                            [
-                                (offset, min(chunk_size, end - offset))
-                                for offset in range(start, end, chunk_size)
-                            ],
+                            [(offset, min(chunk_size, end - offset)) for offset in range(start, end, chunk_size)],
                             max_concurrent_prefetch_requests=_PREFETCH_REQUESTS,
                         )
                     )
@@ -315,9 +301,7 @@ class SFTPConnector(Connector):
                     stream.set_pipelined(True)
                     for chunk in chunks:
                         if not isinstance(chunk, bytes):
-                            raise InvalidConnectorArgumentError(
-                                "File data must be bytes."
-                            )
+                            raise InvalidConnectorArgumentError("File data must be bytes.")
                         stream.write(chunk)
                         total += len(chunk)
                     if mode == "replace":
@@ -327,9 +311,7 @@ class SFTPConnector(Connector):
     def head(self, path: str, lines: int = 10, max_bytes: int = 65536) -> bytes:
         resolved = self._resolve(path)
         if any(type(limit) is not int or limit <= 0 for limit in (lines, max_bytes)):
-            raise InvalidConnectorArgumentError(
-                "Head limits must be positive integers."
-            )
+            raise InvalidConnectorArgumentError("Head limits must be positive integers.")
         with self._client() as sftp:
             with _sftp_errors(resolved), sftp.open(resolved, "rb") as stream:
                 chunks = []
