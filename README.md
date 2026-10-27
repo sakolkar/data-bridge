@@ -111,8 +111,8 @@ for example, `demo + data` becomes `demo%20%2B%20data`.
 | Request | Result |
 | --- | --- |
 | `POST /connection` | Create with name in the body; returns 201 with name and type. |
-| `GET /connection` | List connections with their non-secret settings, ordered by case-sensitive name. |
-| `GET /connection?name=...` | Retrieve metadata for the exact name. |
+| `GET /connection` | List connections with their settings, ordered by case-sensitive name. |
+| `GET /connection?name=...` | Retrieve the connection with the exact name. |
 | `PUT /connection?name=...` | Replace all type/settings fields; returns 200. |
 | `DELETE /connection?name=...` | Delete; returns 204 without a body. |
 
@@ -124,11 +124,10 @@ checked when saving configuration. SFTP connections require `host`, `port`
 (1-65535), `username`, and `password`. Extra body fields are rejected.
 PUT cannot rename a connection and rejects `name` in the body.
 
-Settings are encrypted in SQLite. The connection list returns them decrypted,
-except for write-only secrets such as SFTP passwords, which are never returned.
-Each list entry contains `name`, `type`, and `settings` as a JSON object;
-single-connection detail and create/replace responses contain only `name` and
-`type`. To replace settings, supply the complete new object; no merge endpoint
+Settings are encrypted in SQLite and returned decrypted, including SFTP
+passwords. List entries and single-connection responses both contain `name`,
+`type`, and `settings` as a JSON object; create/replace responses contain only
+`name` and `type`. To replace settings, supply the complete new object; no merge endpoint
 is provided. Local paths are serialized as `{"path":"..."}` in encrypted
 settings. SFTP credentials are encrypted at rest. Validation responses do not
 echo submitted values.

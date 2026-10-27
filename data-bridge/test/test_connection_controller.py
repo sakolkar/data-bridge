@@ -150,8 +150,6 @@ def test_missing_connections_are_distinguishable(controller: ConnectionControlle
     with pytest.raises(ConnectionNotFoundError):
         controller.get("missing")
     with pytest.raises(ConnectionNotFoundError):
-        controller.get_type("missing")
-    with pytest.raises(ConnectionNotFoundError):
         controller.replace(ConnectionRecord(name="missing", type="custom", settings=""))
     with pytest.raises(ConnectionNotFoundError):
         controller.delete("missing")
@@ -185,7 +183,6 @@ def test_decryption_failure_raises_store_error(
         restarted = ConnectionController(restarted_database.session)
         with pytest.raises(ConnectionStoreError, match="decrypt"):
             restarted.get("source")
-        assert restarted.get_type("source") == "custom"
 
 
 def test_storage_failure_is_not_an_empty_list(

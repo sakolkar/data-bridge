@@ -1,8 +1,8 @@
+import json
 from collections.abc import Callable
 from typing import Literal
 
-from pydantic import BaseModel
-from pydantic.fields import FieldInfo
+from pydantic import BaseModel, ValidationError
 
 from connector import Connector
 from connector.local import (
@@ -15,7 +15,8 @@ from connector.sftp import (
     SFTPConnectionSettings,
     SFTPConnector,
 )
-from exceptions import InvalidConnectorArgumentError
+from controllers.connection import ConnectionController
+from exceptions import ConnectorOperationError, InvalidConnectorArgumentError
 
 ConnectorFactory = Callable[[dict[str, object]], Connector]
 Configuration = type[BaseModel]
@@ -53,26 +54,16 @@ def validate_configuration(body: dict[str, object]) -> BaseModel:
     return config_model.model_validate(body)
 
 
-def _is_secret(field: FieldInfo) -> bool:
-    extra = field.json_schema_extra
-    return isinstance(extra, dict) and extra.get("writeOnly") is True
-
-
-def public_settings(connection_type: str, settings: dict[str, object]) -> dict[str, object]:
-    """
-    Return stored settings without write-only fields such as passwords.
-    """
-    connector = _CONNECTORS.get(connection_type)
-    if connector is None:
-        return {}
-    config_model, _ = connector
-    secrets = {name for name, field in config_model.model_fields.items() if _is_secret(field)}
-    return {key: value for key, value in settings.items() if key not in secrets}
-
-
-def create_connector(connection_type: str, settings: dict[str, object]) -> Connector:
-    connector = _CONNECTORS.get(connection_type)
+def resolve_connector(controller: ConnectionController, name: str) -> Connector:
+    record = controller.get(name)
+    connector = _CONNECTORS.get(record.type)
     if connector is None:
         raise InvalidConnectorArgumentError("Unsupported connection type.")
     _, factory = connector
-    return factory(settings)
+    try:
+        settings = json.loads(record.settings)
+        if not isinstance(settings, dict):
+            raise ConnectorOperationError("Stored connection configuration is invalid.")
+        return factory(settings)
+    except (json.JSONDecodeError, ValidationError):
+        raise ConnectorOperationError("Stored connection configuration is invalid.") from None

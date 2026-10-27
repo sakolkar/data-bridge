@@ -26,10 +26,9 @@ def test_configuration_crud(client: TestClient) -> None:
     created = client.post("/connection", json=body)
     assert created.status_code == 201
     assert created.json() == expected
-    assert client.get("/connection", params=params).json() == expected
-    assert client.get("/connection").json() == [
-        {**expected, "settings": {"path": body["path"]}}
-    ]
+    listed = {**expected, "settings": {"path": body["path"]}}
+    assert client.get("/connection", params=params).json() == listed
+    assert client.get("/connection").json() == [listed]
     assert client.post("/connection", json=body).status_code == 409
 
     replaced = client.put(
@@ -213,10 +212,9 @@ def test_local_configuration_crud(client: TestClient, tmp_path: Path) -> None:
         "path": home
     }
     assert client.post("/connection", json=body).status_code == 409
-    assert client.get("/connection", params=params).json() == expected
-    assert client.get("/connection").json() == [
-        {**expected, "settings": {"path": home}}
-    ]
+    listed = {**expected, "settings": {"path": home}}
+    assert client.get("/connection", params=params).json() == listed
+    assert client.get("/connection").json() == [listed]
 
     replacement = str(tmp_path / "replacement")
     updated = client.put(
@@ -276,7 +274,7 @@ def test_local_configuration_persists_encrypted(
         }
 
 
-def test_sftp_configuration_is_encrypted_and_listed_without_password(
+def test_sftp_configuration_is_encrypted_at_rest(
     client: TestClient, sqlite_path: Path
 ) -> None:
     password = "manual-test-password"
@@ -302,14 +300,11 @@ def test_sftp_configuration_is_encrypted_and_listed_without_password(
                 "host": "localhost",
                 "port": 8822,
                 "username": "testuser",
+                "password": password,
             },
         }
     ]
-    assert password not in client.get("/connection").text
-    assert client.get("/connection", params={"name": "sftp-files"}).json() == {
-        "name": "sftp-files",
-        "type": "sftp",
-    }
+    assert client.get("/connection", params={"name": "sftp-files"}).json() == client.get("/connection").json()[0]
 
 
 @pytest.mark.parametrize(
@@ -364,8 +359,8 @@ def test_configuration_persists_through_new_lifespan(
     with TestClient(app) as restarted:
         response = restarted.get("/connection", params={"name": "persisted"})
         assert response.status_code == 200
-        assert response.json() == {"name": "persisted", "type": "local"}
-        assert (
-            json.loads(app.state.connection_controller.get("persisted").settings)["path"]
-            == "password=private-value"
-        )
+        assert response.json() == {
+            "name": "persisted",
+            "type": "local",
+            "settings": {"path": "password=private-value"},
+        }

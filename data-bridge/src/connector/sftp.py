@@ -33,7 +33,7 @@ class SFTPConnectionSettings(BaseModel):
     host: str
     port: Annotated[int, Field(ge=1, le=65535)]
     username: str
-    password: str = Field(repr=False, json_schema_extra={"writeOnly": True})
+    password: str = Field(repr=False)
 
     @field_validator("host", "username")
     @classmethod

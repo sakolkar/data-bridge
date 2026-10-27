@@ -34,13 +34,6 @@ class ConnectionController(SessionController):
         with self._session() as session:
             return session.exec(select(ConnectionRecord).order_by(ConnectionRecord.name)).all()
 
-    def get_type(self, name: str) -> str:
-        with self._session() as session:
-            type_ = session.exec(select(ConnectionRecord.type).where(ConnectionRecord.name == name)).one_or_none()
-        if type_ is None:
-            raise ConnectionNotFoundError()
-        return type_
-
     def get(self, name: str) -> ConnectionRecord:
         with self._session() as session:
             record = session.get(ConnectionRecord, name)

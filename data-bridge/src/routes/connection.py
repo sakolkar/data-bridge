@@ -6,7 +6,7 @@ from fastapi.exceptions import RequestValidationError
 from pydantic import ValidationError
 
 from controllers.connection import ConnectionController
-from connector.registry import public_settings, validate_configuration
+from connector.registry import validate_configuration
 from db.models import ConnectionName, ConnectionRecord
 
 router = APIRouter(prefix="/connection")
@@ -48,6 +48,10 @@ def _summary(record: ConnectionRecord) -> dict[str, str]:
     return {"name": record.name, "type": record.type}
 
 
+def _payload(record: ConnectionRecord) -> dict[str, object]:
+    return {**_summary(record), "settings": json.loads(record.settings)}
+
+
 @router.post("", status_code=201)
 def create_connection(record: Annotated[ConnectionRecord, Depends(get_create_record)], controller: Controller) -> dict[str, str]:
     controller.create(record)
@@ -57,13 +61,10 @@ def create_connection(record: Annotated[ConnectionRecord, Depends(get_create_rec
 @router.get("")
 def get_connection(
     controller: Controller, name: Annotated[ConnectionName | None, Query()] = None
-) -> dict[str, str] | list[dict[str, object]]:
+) -> dict[str, object] | list[dict[str, object]]:
     if name is None:
-        return [
-            {**_summary(record), "settings": public_settings(record.type, json.loads(record.settings))}
-            for record in controller.list()
-        ]
-    return {"name": name, "type": controller.get_type(name)}
+        return [_payload(record) for record in controller.list()]
+    return _payload(controller.get(name))
 
 
 @router.put("")

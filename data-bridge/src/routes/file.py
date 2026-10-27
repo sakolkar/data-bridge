@@ -7,7 +7,7 @@ from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import JSONResponse
 
 from connector import Connector
-from connector.resolution import resolve_connector
+from connector.registry import resolve_connector
 from routes.connection import Name, Controller
 
 router = APIRouter(prefix="/connection/file")

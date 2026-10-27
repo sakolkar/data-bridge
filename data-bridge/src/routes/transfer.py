@@ -10,7 +10,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from controllers.connection import ConnectionController
 from connector import Connector
-from connector.resolution import resolve_connector
+from connector.registry import resolve_connector
 from exceptions import (
     ConnectorError,
     ConnectorFileNotFoundError,
